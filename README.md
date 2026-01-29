@@ -19,7 +19,6 @@ A NSP, NSZ, XCI, & XCZ Installer with basic eShop support for Nintendo Switch
 - Forked from Awoo Installer [Huntereb Awoo Installer](https://github.com/Huntereb/Awoo-Installer)
 - Based on [Adubbz Tinfoil](https://github.com/Adubbz/Tinfoil)
 - Uses [XorTroll's Plutonium](https://github.com/XorTroll/Plutonium) for a pretty graphical interface
-- Just werks
 
 ## Why?
 Because Tinfoil is no longer being supported and not updated for the new firmware versions.
@@ -69,6 +68,12 @@ Screenshots:
 - "Remove anime" hides the mascot art.
 - Sounds can be disabled in Settings. You can override sounds by placing `success.wav` and `bark.wav` in `sdmc:/switch/CyberFoil/`.
 - Shop icon cache is stored in `sdmc:/switch/CyberFoil/shop_icons/`.
+
+## To Do
+- Better search and navigation for large libraries (Planned)
+- Add MTP Install function for NSP,NSZ,XCI and XCZ installation (In-progress)
+- Switch betwwen multiple shops.
+
 
 ## Thanks to
 - HookedBehemoth for A LOT of contributions
