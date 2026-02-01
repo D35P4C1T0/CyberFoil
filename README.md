@@ -2,7 +2,7 @@
 ![GitHub all releases downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/total)
 ![GitHub latest release downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/latest/total)
 
-## Version: 1.3.8
+## Version: 1.3.9
 
 ## Buy me a Coffee at kofi -> https://ko-fi.com/cyberhazard
 
@@ -16,6 +16,7 @@ A NSP, NSZ, XCI, & XCZ Installer with basic eShop support for Nintendo Switch
 - Installs NSP/NSZ/XCI/XCZ files and split NSP/XCI files from your SD card
 - Installs NSP/NSZ/XCI/XCZ files over LAN or USB from tools such as [NS-USBloader](https://github.com/developersu/ns-usbloader)
 - Installs NSP/NSZ/XCI/XCZ files over the internet by URL or Google Drive
+- Installs NSP/NSZ/XCI/XCZ files over MTP (USB file transfer)
 - Verifies NCAs by header signature before they're installed
 - Installs and manages the latest signature patches quickly and easily
 - Ownfoil-compatible eShop with sections, search, and cover art previews
@@ -44,6 +45,7 @@ Browsing:
 - ZR searches in the All section.
 - The right-side panel shows the cover art for the focused entry.
 - Installed uses a grid layout with D-pad navigation. Press A to view details.
+- In grid mode, selected titles show a green highlight and selected overlay.
 
 Updates and DLC:
 - Updates/DLC show only when the base title is installed.
@@ -63,6 +65,12 @@ New in 1.3.8:
 - Option to hide the Installed section in the eShop.
 - Updates and DLC now respect base install status and installed DLC visibility.
 
+New in 1.3.9:
+- MTP installs now work reliably across repeated sessions.
+- MTP completion plays the success sound.
+- Main menu and settings support tap-to-select.
+- eShop grid selections use a green highlight and selected overlay.
+
 Screenshots:
 ![Shop Section](screenshots/CyberFoil_eShop.jpg)
 ![Shop Section](screenshots/CyberFoil_eShop_settings.jpg)
@@ -72,10 +80,11 @@ Screenshots:
 - "Remove anime" hides the mascot art.
 - Sounds can be disabled in Settings. You can override sounds by placing `success.wav` and `bark.wav` in `sdmc:/switch/CyberFoil/`.
 - Shop icon cache is stored in `sdmc:/switch/CyberFoil/shop_icons/`.
+- Touch input: tap items in the main menu and settings to select.
 
 ## To Do
 - Improve search and navigation for large libraries (Planned)
-- Add MTP install functionality for NSP, NSZ, XCI, and XCZ files (In progress)
+ - Improve MTP robustness and host compatibility
 - Add support for switching between multiple shops
 - Preload title images and banners to cache for a faster UI experience
 - Create a beginner-friendly video tutorial for the complete setup (CyberFoil and Ownfoil)

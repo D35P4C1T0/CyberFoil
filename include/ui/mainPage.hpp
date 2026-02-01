@@ -40,6 +40,10 @@ namespace inst::ui {
         private:
             bool appletFinished;
             bool updateFinished;
+            bool touchActive = false;
+            bool touchMoved = false;
+            int touchStartX = 0;
+            int touchStartY = 0;
             TextBlock::Ref butText;
             Rectangle::Ref topRect;
             Rectangle::Ref botRect;

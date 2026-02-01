@@ -35,6 +35,10 @@ namespace inst::ui {
             Rectangle::Ref botRect;
             TextBlock::Ref pageInfoText;
             pu::ui::elm::Menu::Ref menu;
+            bool touchActive = false;
+            bool touchMoved = false;
+            int touchStartX = 0;
+            int touchStartY = 0;
             void setMenuText();
             std::string getMenuOptionIcon(bool ourBool);
             std::string getMenuLanguage(int ourLangCode);

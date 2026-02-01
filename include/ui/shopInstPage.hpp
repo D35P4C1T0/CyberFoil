@@ -65,6 +65,7 @@ namespace inst::ui {
             Image::Ref previewImage;
             Rectangle::Ref gridHighlight;
             std::vector<Image::Ref> gridImages;
+            std::vector<Rectangle::Ref> shopGridSelectHighlights;
             std::vector<Image::Ref> shopGridSelectIcons;
             TextBlock::Ref gridTitleText;
             TextBlock::Ref imageLoadingText;

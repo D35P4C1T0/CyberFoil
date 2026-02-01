@@ -199,11 +199,18 @@ namespace inst::ui {
             img->SetVisible(false);
             this->gridImages.push_back(img);
         }
+        auto selectedColor = COLOR("#34C75966");
+        this->shopGridSelectHighlights.reserve(kGridItemsPerPage);
+        for (int i = 0; i < kGridItemsPerPage; i++) {
+            auto highlight = Rectangle::New(0, 0, kGridTileWidth + 8, kGridTileHeight + 8, selectedColor);
+            highlight->SetVisible(false);
+            this->shopGridSelectHighlights.push_back(highlight);
+        }
         this->shopGridSelectIcons.reserve(kGridItemsPerPage);
         for (int i = 0; i < kGridItemsPerPage; i++) {
-            auto icon = Image::New(0, 0, "romfs:/images/icons/check-box-outline.png");
-            icon->SetWidth(100);
-            icon->SetHeight(100);
+            auto icon = Image::New(0, 0, "romfs:/images/icons/title_selected.png");
+            icon->SetWidth(120);
+            icon->SetHeight(120);
             icon->SetVisible(false);
             this->shopGridSelectIcons.push_back(icon);
         }
@@ -245,6 +252,8 @@ namespace inst::ui {
 #pragma GCC diagnostic pop
         this->Add(this->infoImage);
         this->Add(this->previewImage);
+        for (auto& highlight : this->shopGridSelectHighlights)
+            this->Add(highlight);
         for (auto& img : this->gridImages)
             this->Add(img);
         for (auto& icon : this->shopGridSelectIcons)
@@ -936,6 +945,8 @@ namespace inst::ui {
                 img->SetVisible(false);
             this->gridHighlight->SetVisible(false);
             this->gridTitleText->SetVisible(false);
+            for (auto& highlight : this->shopGridSelectHighlights)
+                highlight->SetVisible(false);
             for (auto& icon : this->shopGridSelectIcons)
                 icon->SetVisible(false);
             this->imageLoadingText->SetVisible(false);
@@ -1088,6 +1099,7 @@ namespace inst::ui {
             int y = kGridStartY + (row * (kGridTileHeight + kGridGap));
 
             if (itemIndex >= maxIndex) {
+                this->shopGridSelectHighlights[i]->SetVisible(false);
                 this->shopGridSelectIcons[i]->SetVisible(false);
                 continue;
             }
@@ -1099,9 +1111,15 @@ namespace inst::ui {
                     return entry.url == item.url;
                 });
             }
-            this->shopGridSelectIcons[i]->SetX(x + (kGridTileWidth - 100) / 2);
-            this->shopGridSelectIcons[i]->SetY(y + (kGridTileHeight - 100) / 2);
+            const int iconSize = 120;
+            this->shopGridSelectIcons[i]->SetX(x + (kGridTileWidth - iconSize) / 2);
+            this->shopGridSelectIcons[i]->SetY(y + (kGridTileHeight - iconSize) / 2);
             this->shopGridSelectIcons[i]->SetVisible(isSelected);
+            this->shopGridSelectHighlights[i]->SetX(x - 4);
+            this->shopGridSelectHighlights[i]->SetY(y - 4);
+            this->shopGridSelectHighlights[i]->SetWidth(kGridTileWidth + 8);
+            this->shopGridSelectHighlights[i]->SetHeight(kGridTileHeight + 8);
+            this->shopGridSelectHighlights[i]->SetVisible(isSelected);
         }
 
         int slot = this->shopGridIndex - pageStart;

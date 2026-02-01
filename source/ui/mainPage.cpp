@@ -227,7 +227,36 @@ namespace inst::ui {
             mainApp->FadeOut();
             mainApp->Close();
         }
-        if ((Down & HidNpadButton_A) || (Up & TouchPseudoKey)) {
+        bool touchSelect = false;
+        if (!Pos.IsEmpty()) {
+            const int menuX = this->optionMenu->GetProcessedX();
+            const int menuY = this->optionMenu->GetProcessedY();
+            const int menuW = this->optionMenu->GetWidth();
+            const int menuH = this->optionMenu->GetHeight();
+            const bool inMenu = (Pos.X >= menuX) && (Pos.X <= (menuX + menuW)) && (Pos.Y >= menuY) && (Pos.Y <= (menuY + menuH));
+            if (!this->touchActive && inMenu) {
+                this->touchActive = true;
+                this->touchMoved = false;
+                this->touchStartX = Pos.X;
+                this->touchStartY = Pos.Y;
+            } else if (this->touchActive) {
+                int dx = Pos.X - this->touchStartX;
+                int dy = Pos.Y - this->touchStartY;
+                if (dx < 0) dx = -dx;
+                if (dy < 0) dy = -dy;
+                if (dx > 12 || dy > 12) {
+                    this->touchMoved = true;
+                }
+            }
+        } else if (this->touchActive) {
+            if (!this->touchMoved) {
+                touchSelect = true;
+            }
+            this->touchActive = false;
+            this->touchMoved = false;
+        }
+
+        if ((Down & HidNpadButton_A) || touchSelect) {
             switch (this->optionMenu->GetSelectedIndex()) {
                 case 0:
                     this->shopInstallMenuItem_Click();
