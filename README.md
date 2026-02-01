@@ -2,7 +2,9 @@
 ![GitHub all releases downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/total)
 ![GitHub latest release downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/latest/total)
 
-Version: 1.3.8
+## Version: 1.3.8
+
+## Buy me a Coffee at kofi -> https://ko-fi.com/cyberhazard
 
 DEMO Video: https://youtu.be/4Kl0n9vnVP8
 
@@ -81,8 +83,7 @@ Screenshots:
 
 
 ## Thanks to
-- HookedBehemoth for A LOT of contributions
-- Huntereb for creating Awoo Installer
+- Huntereb and HookedBehemoth for creating Awoo Installer
 - Adubbz and other contributors for [Tinfoil](https://github.com/Adubbz/Tinfoil)
 - XorTroll for [Plutonium](https://github.com/XorTroll/Plutonium) and [Goldleaf](https://github.com/XorTroll/Goldleaf)
 - blawar (wife strangulator) and nicoboss for [NSZ](https://github.com/nicoboss/nsz) support

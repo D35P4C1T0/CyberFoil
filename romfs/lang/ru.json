@@ -2,7 +2,7 @@
     "main": {
         "menu": {
             "sd": "Установка из SD-карты",
-            "hdd": "Install from USB SSD/HDD",
+            "hdd": "Установка с USB SSD/HDD",
             "net": "Установка по сети",
             "shop": "Установка из Ownfoil",
             "usb": "Установка через USB",
@@ -26,8 +26,8 @@
             }
         },
         "hdd": {
-            "title": "No USB drive detected",
-            "notfound": "Plug in a USB SSD or hard drive to install from it."
+            "title": "USB-накопитель не обнаружен",
+            "notfound": "Подключите USB SSD или жёсткий диск, чтобы установить с него."
         },
         "applet": {
             "title": "Applet Mode не поддерживается",
@@ -65,23 +65,23 @@
             "buttons1": " Выбрать файл     Выбрать всё     Установить файл(ы)     Отмена"
         },
         "shop": {
-            "loading": "Loading shop list...",
-            "top_info": "Select what files you want to install from the shop, then press the Plus button!",
-            "failed": "Failed to load shop",
+            "loading": "Загрузка списка магазина...",
+            "top_info": "Выберите файлы для установки из магазина и нажмите кнопку "+"!",
+            "failed": "Не удалось загрузить магазин",
             "encrypted_unsupported": "Зашифрованные ответы магазина не поддерживаются. Отключите «Шифровать магазин» в настройках Ownfoil.",
-            "empty": "Shop has no files.",
-            "source_string": " from Ownfoil shop",
+            "empty": "В магазине нет файлов.",
+            "source_string": " из магазина Ownfoil",
             "buttons_loading": " Отмена",
-            "buttons": " Выбрать файл     Выбрать всё     Установить файл(ы)     Обновить    / Section     View     Отмена",
-            "buttons_all": " Выбрать файл     Выбрать всё     Установить файл(ы)     Обновить    / Section     Search     View     Отмена",
-            "search_hint": "Search all titles",
-            "update_prompt_title": "Install updates?",
-            "update_prompt_desc": "Include available updates for selected titles? Updates found: ",
-            "motd_title": "Message of the day",
-            "buttons_installed": " Details     Refresh    / Section     Cancel",
-            "detail_type": "Type: ",
-            "detail_titleid": "Title ID: ",
-            "detail_version": "Version: "
+            "buttons": " Выбрать файл     Выбрать всё     Установить файл(ы)     Обновить    / Раздел     Просмотр     Отмена",
+            "buttons_all": " Выбрать файл     Выбрать всё     Установить файл(ы)     Обновить    / Раздел     Поиск     Просмотр     Отмена",
+            "search_hint": "Искать по всем тайтлам",
+            "update_prompt_title": "Установить обновления?",
+            "update_prompt_desc": "Включить доступные обновления для выбранных тайтлов? Найдено обновлений: ",
+            "motd_title": "Сообщение дня",
+            "buttons_installed": " Подробно     Обновить    / Раздел     Отмена",
+            "detail_type": "Тип: ",
+            "detail_titleid": "ID тайтла: ",
+            "detail_version": "Версия: "
         },
         "sd": {
             "help": {
@@ -97,15 +97,15 @@
         },
         "hdd": {
             "help": {
-                "title": "Help",
-                "desc": "Plug in a USB SSD or hard drive, browse to and select NSP, NSZ, XCI,\nor XCZ files, then press the Plus button."
+                "title": "Помощь",
+                "desc": "Подключите USB SSD или жёсткий диск, найдите и выберите файлы NSP, NSZ, XCI или XCZ, затем нажмите кнопку "+"."
             },
-            "top_info": "Select what files you want to install, then press the Plus button!",
-            "source_string": " from USB drive",
-            "delete_info": " installed! Delete it from the USB drive?",
-            "delete_info_multi": " files installed successfully! Delete them from the USB drive?",
-            "delete_desc": "The original files aren't needed anymore after they've been installed",
-            "buttons": " Select File     Select All     Install File(s)     Help     Cancel"
+            "top_info": "Выберите файлы, которые хотите установить, затем нажмите кнопку "+"!",
+            "source_string": " с USB-накопителя",
+            "delete_info": " установлен! Удалить его с USB-накопителя?",
+            "delete_info_multi": " файлов успешно установлено! Удалить их с USB-накопителя?",
+            "delete_desc": "После установки исходные файлы больше не нужны",
+            "buttons": " Выбрать файл     Выбрать всё     Установить файл(ы)     Помощь     Отмена"
         },
         "usb": {
             "help": {
@@ -189,13 +189,13 @@
             "shop_url": "URL Ownfoil: ",
             "shop_user": "Ownfoil пользователь: ",
             "shop_pass": "Ownfoil пароль: ",
-            "shop_hide_installed": "Hide installed titles in eShop",
+            "shop_hide_installed": "Скрывать установленные тайтлы в eShop",
             "shop_hide_installed_section": "\u0421\u043a\u0440\u044b\u0442\u044c \u0440\u0430\u0437\u0434\u0435\u043b \u00ab\u0423\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e\u00bb \u0432 eShop",
             "language": "Язык: ",
             "check_update": "Проверить наличие обновлений CyberFoil",
             "credits": "Благодарности",
-            "sound": "Enable sounds",
-            "oled": "Enable OLED mode"
+            "sound": "Включить звуки",
+            "oled": "Включить режим OLED"
         },
         "nca_warn": {
             "title": "Внимание!",
@@ -204,9 +204,9 @@
         },
         "sig_hint": "Введите URL откуда следует брать Signature Patches",
         "shop": {
-            "url_hint": "Enter your Ownfoil shop URL (example: http://192.168.1.2:8465)",
-            "user_hint": "Enter your Ownfoil username (optional)",
-            "pass_hint": "Enter your Ownfoil password (optional)"
+            "url_hint": "Укажите URL вашего магазина Ownfoil (пример: http://192.168.1.2:8465)",
+            "user_hint": "Укажите имя пользователя Ownfoil (необязательно)",
+            "pass_hint": "Укажите пароль Ownfoil (необязательно)"
         },
         "update": {
             "title": "Доступно обновление",

@@ -2,7 +2,7 @@
     "main": {
         "menu": {
             "sd": "Von SD-Karte installieren",
-            "hdd": "Install from USB SSD/HDD",
+            "hdd": "Von USB-SSD/Festplatte installieren",
             "net": "Über LAN oder Internet installieren",
             "shop": "Installieren vom Ownfoil-Shop",
             "usb": "Über USB installieren",
@@ -26,8 +26,8 @@
             }
         },
         "hdd": {
-            "title": "No USB drive detected",
-            "notfound": "Plug in a USB SSD or hard drive to install from it."
+            "title": "Kein USB-Laufwerk erkannt",
+            "notfound": "Schließe eine USB-SSD oder Festplatte an, um von ihr zu installieren."
         },
         "applet": {
             "title": "Applet-Modus wird nicht unterstützt",
@@ -97,15 +97,15 @@
         },
         "hdd": {
             "help": {
-                "title": "Help",
-                "desc": "Plug in a USB SSD or hard drive, browse to and select NSP, NSZ, XCI,\nor XCZ files, then press the Plus button."
+                "title": "Hilfe",
+                "desc": "Schließe eine USB-SSD oder Festplatte an, suche nach NSP-, NSZ-, XCI-\noder XCZ-Dateien, wähle sie aus und drücke dann die Plus-Taste."
             },
-            "top_info": "Select what files you want to install, then press the Plus button!",
-            "source_string": " from USB drive",
-            "delete_info": " installed! Delete it from the USB drive?",
-            "delete_info_multi": " files installed successfully! Delete them from the USB drive?",
-            "delete_desc": "The original files aren't needed anymore after they've been installed",
-            "buttons": " Select File     Select All     Install File(s)     Help     Cancel"
+            "top_info": "Wähle Dateien zur Installation vom USB-Laufwerk aus und drücke dann die Plus-Taste!",
+            "source_string": " vom USB-Laufwerk",
+            "delete_info": " installiert! Von dem USB-Laufwerk löschen?",
+            "delete_info_multi": " Dateien erfolgreich installiert! Von dem USB-Laufwerk löschen?",
+            "delete_desc": "Die Originaldateien werden nach der Installation nicht mehr benötigt",
+            "buttons": " Datei auswählen     Alle auswählen     Datei(en) installieren     Hilfe     Abbrechen"
         },
         "usb": {
             "help": {
@@ -189,13 +189,13 @@
             "shop_url": "Ownfoil Shop-URL: ",
             "shop_user": "Ownfoil Benutzername: ",
             "shop_pass": "Ownfoil Passwort: ",
-            "shop_hide_installed": "Hide installed titles in eShop",
+            "shop_hide_installed": "Installierte Titel im eShop ausblenden",
             "shop_hide_installed_section": "Installiert-Abschnitt im eShop ausblenden",
             "language": "Sprache: ",
             "check_update": "Suche nach Updates für CyberFoil",
             "credits": "Anerkennung",
-            "sound": "Enable sounds",
-            "oled": "Enable OLED mode"
+            "sound": "Töne aktivieren",
+            "oled": "OLED-Modus aktivieren"
         },
         "nca_warn": {
             "title": "Warnung!",
@@ -204,9 +204,9 @@
         },
         "sig_hint": "Gib eine URL an, um Signatur Patches zu beziehen",
         "shop": {
-            "url_hint": "Enter your Ownfoil shop URL (example: http://192.168.1.2:8465)",
-            "user_hint": "Enter your Ownfoil username (optional)",
-            "pass_hint": "Enter your Ownfoil password (optional)"
+            "url_hint": "Gib die URL deines Ownfoil-Shops ein (Beispiel: http://192.168.1.2:8465)",
+            "user_hint": "Gib deinen Ownfoil-Benutzernamen ein (optional)",
+            "pass_hint": "Gib dein Ownfoil-Passwort ein (optional)"
         },
         "update": {
             "title": "Neue Version verfügbar",

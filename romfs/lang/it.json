@@ -2,7 +2,7 @@
     "main": {
         "menu": {
             "sd": "Installa dalla SD",
-            "hdd": "Install from USB SSD/HDD",
+            "hdd": "Installa da SSD/HDD USB",
             "net": "Installa via LAN o da internet",
             "shop": "Installa da Ownfoil",
             "usb": "Installa via USB",
@@ -26,8 +26,8 @@
             }
         },
         "hdd": {
-            "title": "No USB drive detected",
-            "notfound": "Plug in a USB SSD or hard drive to install from it."
+            "title": "Nessuna unità USB rilevata",
+            "notfound": "Collega un SSD o disco rigido USB per installare da lì."
         },
         "applet": {
             "title": "Applet Mode non è supportata",
@@ -65,23 +65,23 @@
             "buttons1": " Seleziona File     Seleziona tutto     Installa i File     Annulla"
         },
         "shop": {
-            "loading": "Loading shop list...",
-            "top_info": "Select what files you want to install from the shop, then press the Plus button!",
-            "failed": "Failed to load shop",
+            "loading": "Caricamento elenco del negozio...",
+            "top_info": "Seleziona i file che vuoi installare dal negozio, poi premi il tasto Più!",
+            "failed": "Impossibile caricare il negozio",
             "encrypted_unsupported": "Le risposte del negozio crittografate non sono supportate. Disattiva «Crittografa negozio» nelle impostazioni di Ownfoil.",
-            "empty": "Shop has no files.",
-            "source_string": " from Ownfoil shop",
+            "empty": "Il negozio non contiene file.",
+            "source_string": " dal negozio Ownfoil",
             "buttons_loading": " Annulla",
-            "buttons": " Seleziona File     Seleziona tutto     Installa i File     Aggiorna    / Section     View     Annulla",
-            "buttons_all": " Seleziona File     Seleziona tutto     Installa i File     Aggiorna    / Section     Search     View     Annulla",
-            "search_hint": "Search all titles",
-            "update_prompt_title": "Install updates?",
-            "update_prompt_desc": "Include available updates for selected titles? Updates found: ",
-            "motd_title": "Message of the day",
-            "buttons_installed": " Details     Refresh    / Section     Cancel",
-            "detail_type": "Type: ",
-            "detail_titleid": "Title ID: ",
-            "detail_version": "Version: "
+            "buttons": " Seleziona File     Seleziona tutto     Installa i File     Aggiorna    / Sezione     Vista     Annulla",
+            "buttons_all": " Seleziona File     Seleziona tutto     Installa i File     Aggiorna    / Sezione     Cerca     Vista     Annulla",
+            "search_hint": "Cerca in tutti i titoli",
+            "update_prompt_title": "Installare gli aggiornamenti?",
+            "update_prompt_desc": "Includere gli aggiornamenti disponibili per i titoli selezionati? Aggiornamenti trovati: ",
+            "motd_title": "Messaggio del giorno",
+            "buttons_installed": " Dettagli     Refresh    / Section     Cancel",
+            "detail_type": "Tipo: ",
+            "detail_titleid": "ID titolo: ",
+            "detail_version": "Versione: "
         },
         "sd": {
             "help": {
@@ -97,15 +97,15 @@
         },
         "hdd": {
             "help": {
-                "title": "Help",
-                "desc": "Plug in a USB SSD or hard drive, browse to and select NSP, NSZ, XCI,\nor XCZ files, then press the Plus button."
+                "title": "Aiuto",
+                "desc": "Collega un SSD o disco rigido USB, cerca e seleziona file NSP, NSZ, XCI\no XCZ e premi il tasto Più."
             },
-            "top_info": "Select what files you want to install, then press the Plus button!",
-            "source_string": " from USB drive",
-            "delete_info": " installed! Delete it from the USB drive?",
-            "delete_info_multi": " files installed successfully! Delete them from the USB drive?",
-            "delete_desc": "The original files aren't needed anymore after they've been installed",
-            "buttons": " Select File     Select All     Install File(s)     Help     Cancel"
+            "top_info": "Seleziona i file che vuoi installare e premi il tasto Più!",
+            "source_string": " dall'unità USB",
+            "delete_info": " installato! Eliminarlo dall'unità USB?",
+            "delete_info_multi": " file installati correttamente! Eliminarli dall'unità USB?",
+            "delete_desc": "I file originali non sono più necessari dopo l'installazione",
+            "buttons": " Seleziona File     Seleziona tutto     Installa i File     Aiuto     Annulla"
         },
         "usb": {
             "help": {
@@ -189,13 +189,13 @@
             "shop_url": "URL Ownfoil: ",
             "shop_user": "Utente Ownfoil: ",
             "shop_pass": "Password Ownfoil: ",
-            "shop_hide_installed": "Hide installed titles in eShop",
+            "shop_hide_installed": "Nascondi i titoli installati nell'eShop",
             "shop_hide_installed_section": "Nascondi la sezione Installati nell\u2019eShop",
             "language": "Lingua: ",
             "check_update": "Controlla aggiornamenti di CyberFoil ora",
             "credits": "Crediti",
-            "sound": "Enable sounds",
-            "oled": "Enable OLED mode"
+            "sound": "Abilita i suoni",
+            "oled": "Abilita la modalità OLED"
         },
         "nca_warn": {
             "title": "Attenzione!",
@@ -204,9 +204,9 @@
         },
         "sig_hint": "Inserisci l'URL da cui ottenere le SigPatches",
         "shop": {
-            "url_hint": "Enter your Ownfoil shop URL (example: http://192.168.1.2:8465)",
-            "user_hint": "Enter your Ownfoil username (optional)",
-            "pass_hint": "Enter your Ownfoil password (optional)"
+            "url_hint": "Inserisci l'URL del tuo negozio Ownfoil (esempio: http://192.168.1.2:8465)",
+            "user_hint": "Inserisci il tuo nome utente Ownfoil (opzionale)",
+            "pass_hint": "Inserisci la tua password Ownfoil (opzionale)"
         },
         "update": {
             "title": "Aggiornamento disponibile",
