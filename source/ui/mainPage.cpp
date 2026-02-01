@@ -8,6 +8,7 @@
 #include "sigInstall.hpp"
 #include "data/buffered_placeholder_writer.hpp"
 #include "mtp_server.hpp"
+#include "nx/usbhdd.h"
 
 #define COLOR(hex) pu::ui::Color::FromHex(hex)
 
@@ -79,7 +80,7 @@ namespace inst::ui {
         this->batteryCap = Rectangle::New(0, 0, 3, 6, COLOR("#FFFFFF66"));
         this->butText = TextBlock::New(10, 678, "main.buttons"_lang, 20);
         this->butText->SetColor(COLOR("#FFFFFFFF"));
-        this->optionMenu = pu::ui::elm::Menu::New(0, 95, 1280, COLOR("#67000000"), 94, 6);
+        this->optionMenu = pu::ui::elm::Menu::New(0, 95, 1280, COLOR("#67000000"), 70, 8);
         if (inst::config::oledMode) {
             this->optionMenu->SetOnFocusColor(COLOR("#FFFFFF33"));
             this->optionMenu->SetScrollbarColor(COLOR("#FFFFFF66"));
@@ -95,10 +96,13 @@ namespace inst::ui {
         this->netInstallMenuItem->SetIcon("romfs:/images/icons/cloud-download.png");
         this->shopInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.shop"_lang);
         this->shopInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
-        this->shopInstallMenuItem->SetIcon("romfs:/images/icons/cloud-download.png");
+        this->shopInstallMenuItem->SetIcon("romfs:/images/icons/eshop.png");
         this->usbInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.usb"_lang);
         this->usbInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->usbInstallMenuItem->SetIcon("romfs:/images/icons/usb-port.png");
+        this->hddInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.hdd"_lang);
+        this->hddInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
+        this->hddInstallMenuItem->SetIcon("romfs:/images/icons/usb-install.png");
         this->mtpInstallMenuItem = pu::ui::elm::MenuItem::New("main.menu.mtp"_lang);
         this->mtpInstallMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->mtpInstallMenuItem->SetIcon("romfs:/images/icons/usb-port.png");
@@ -136,9 +140,9 @@ namespace inst::ui {
         this->Add(this->butText);
         this->optionMenu->AddItem(this->shopInstallMenuItem);
         this->optionMenu->AddItem(this->installMenuItem);
-        this->optionMenu->AddItem(this->netInstallMenuItem);
-        this->optionMenu->AddItem(this->usbInstallMenuItem);
+        this->optionMenu->AddItem(this->hddInstallMenuItem);
         this->optionMenu->AddItem(this->mtpInstallMenuItem);
+        this->optionMenu->AddItem(this->netInstallMenuItem);
         this->optionMenu->AddItem(this->sigPatchesMenuItem);
         this->optionMenu->AddItem(this->settingsMenuItem);
         this->optionMenu->AddItem(this->exitMenuItem);
@@ -179,6 +183,16 @@ namespace inst::ui {
         }
         if (inst::util::usbIsConnected()) mainApp->usbinstPage->startUsb();
         else mainApp->CreateShowDialog("main.usb.error.title"_lang, "main.usb.error.desc"_lang, {"common.ok"_lang}, false);
+    }
+
+    void MainPage::hddInstallMenuItem_Click() {
+        if (nx::hdd::count() && nx::hdd::rootPath()) {
+            mainApp->hddinstPage->drawMenuItems(true, nx::hdd::rootPath());
+            mainApp->hddinstPage->menu->SetSelectedIndex(0);
+            mainApp->LoadLayout(mainApp->hddinstPage);
+        } else {
+            mainApp->CreateShowDialog("main.hdd.title"_lang, "main.hdd.notfound"_lang, {"common.ok"_lang}, true);
+        }
     }
 
     void MainPage::mtpInstallMenuItem_Click() {
@@ -222,13 +236,13 @@ namespace inst::ui {
                     this->installMenuItem_Click();
                     break;
                 case 2:
-                    this->netInstallMenuItem_Click();
+                    MainPage::hddInstallMenuItem_Click();
                     break;
                 case 3:
-                    MainPage::usbInstallMenuItem_Click();
+                    MainPage::mtpInstallMenuItem_Click();
                     break;
                 case 4:
-                    MainPage::mtpInstallMenuItem_Click();
+                    this->netInstallMenuItem_Click();
                     break;
                 case 5:
                     MainPage::sigPatchesMenuItem_Click();
