@@ -340,25 +340,25 @@ namespace inst::ui {
             mainApp->FadeOut();
             mainApp->Close();
         }
-        if (Down & HidNpadButton_Left) {
+        if (Down & (HidNpadButton_Left | HidNpadButton_StickLLeft)) {
             if ((this->selectedMainIndex % kMainGridCols) > 0) {
                 this->selectedMainIndex--;
                 this->updateMainGridSelection();
             }
         }
-        if (Down & HidNpadButton_Right) {
+        if (Down & (HidNpadButton_Right | HidNpadButton_StickLRight)) {
             if ((this->selectedMainIndex % kMainGridCols) < (kMainGridCols - 1) && this->selectedMainIndex < ((kMainGridCols * kMainGridRows) - 1)) {
                 this->selectedMainIndex++;
                 this->updateMainGridSelection();
             }
         }
-        if (Down & HidNpadButton_Up) {
+        if (Down & (HidNpadButton_Up | HidNpadButton_StickLUp)) {
             if (this->selectedMainIndex >= kMainGridCols) {
                 this->selectedMainIndex -= kMainGridCols;
                 this->updateMainGridSelection();
             }
         }
-        if (Down & HidNpadButton_Down) {
+        if (Down & (HidNpadButton_Down | HidNpadButton_StickLDown)) {
             if (this->selectedMainIndex + kMainGridCols < (kMainGridCols * kMainGridRows)) {
                 this->selectedMainIndex += kMainGridCols;
                 this->updateMainGridSelection();

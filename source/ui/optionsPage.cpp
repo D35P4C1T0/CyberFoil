@@ -230,6 +230,7 @@ namespace inst::ui {
             addItem("options.menu_items.shop_pass"_lang + shopPassDisplay, false, false);
             addItem("options.menu_items.shop_hide_installed"_lang, true, inst::config::shopHideInstalled);
             addItem("options.menu_items.shop_hide_installed_section"_lang, true, inst::config::shopHideInstalledSection);
+            addItem("options.menu_items.shop_start_grid_mode"_lang, true, inst::config::shopStartGridMode);
             addItem("options.menu_items.shop_reset_icons"_lang, false, false);
             return;
         }
@@ -397,7 +398,9 @@ namespace inst::ui {
                 if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kGeneralMap) / sizeof(kGeneralMap[0])))) return;
                 selectedIndex = kGeneralMap[selectedIndex];
             } else if (this->selectedSection == 1) {
-                selectedIndex += 9;
+                static const int kShopMap[] = {9, 10, 11, 12, 13, 19, 14};
+                if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kShopMap) / sizeof(kShopMap[0])))) return;
+                selectedIndex = kShopMap[selectedIndex];
             } else {
                 static const int kSystemMap[] = {15, 4, 5, 16, 17, 18};
                 if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kSystemMap) / sizeof(kSystemMap[0])))) return;
@@ -542,6 +545,11 @@ namespace inst::ui {
                             shopInstStuff::ResetShopIconCache(inst::config::shopUrl);
                         }
                     }
+                    break;
+                case 19:
+                    inst::config::shopStartGridMode = !inst::config::shopStartGridMode;
+                    inst::config::setConfig();
+                    this->refreshOptions();
                     break;
                 case 15:
                     keyboardResult = inst::util::softwareKeyboard("options.sig_hint"_lang, inst::config::sigPatchesUrl.c_str(), 500);
