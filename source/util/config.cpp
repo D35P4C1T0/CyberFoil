@@ -62,7 +62,7 @@ namespace inst::config {
         gayMode = true;
         soundEnabled = true;
         oledMode = true;
-        mtpExposeAlbum = true;
+        mtpExposeAlbum = false;
         ignoreReqVers = true;
         overClock = true;
         usbAck = false;
