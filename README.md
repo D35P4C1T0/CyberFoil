@@ -2,7 +2,7 @@
 ![GitHub all releases downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/total)
 ![GitHub latest release downloads](https://img.shields.io/github/downloads/luketanti/CyberFoil/latest/total)
 
-## Version: 1.3.11-dev
+## Version: 1.3.11
 
 ## Buy me a Coffee at kofi -> https://ko-fi.com/cyberhazard
 
@@ -71,9 +71,16 @@ New in 1.3.11:
 - MTP install progress now shows spinner/status with MiB/GiB transfer info.
 - MTP completion status is shown inline on the install screen (no blocking popup).
 - Optional Album drive exposure during MTP install mode (toggle in Settings).
+- Album drive exposure is now disabled by default.
 - Album MTP drive uses libnx image-directory APIs for better Windows Explorer compatibility.
 - Main menu and settings support tap-to-select.
+- Settings tab/list focus navigation and highlight behavior is improved.
 - eShop grid selections use a green highlight and selected overlay.
+- Shop grid/list behavior and refresh state handling are improved.
+- Shop search now supports diacritic-insensitive matching.
+- Shop grid refreshes immediately when applying a search filter.
+- Active shop search term is shown in the top info bar.
+- Main menu info popup and hint text are now localized.
 
 Screenshots:
 ![Shop Section](screenshots/CyberFoil_eShop.jpg)
