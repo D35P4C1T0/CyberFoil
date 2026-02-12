@@ -1283,14 +1283,23 @@ namespace inst::ui {
             for (auto& section : this->shopSections) {
                 if (section.items.empty())
                     continue;
-                if (section.id == "all" || section.id == "installed" || section.id == "updates")
+                if (section.id == "installed" || section.id == "updates" || section.id == "update")
                     continue;
 
                 std::vector<shopInstStuff::ShopItem> filtered;
                 filtered.reserve(section.items.size());
                 for (const auto& item : section.items) {
+                    bool hideInstalledItem = false;
                     std::uint32_t installedVersion = 0;
-                    if (!IsBaseItem(item) || !item.hasTitleId || !isBaseInstalled(item, installedVersion)) {
+                    if (IsBaseItem(item)) {
+                        hideInstalledItem = isBaseInstalled(item, installedVersion);
+                    } else if (IsUpdateItem(item)) {
+                        if (isBaseInstalled(item, installedVersion) && item.hasAppVersion && item.appVersion <= installedVersion)
+                            hideInstalledItem = true;
+                    } else if (IsDlcItem(item)) {
+                        hideInstalledItem = isDlcInstalled(item);
+                    }
+                    if (!hideInstalledItem) {
                         filtered.push_back(item);
                     }
                 }
