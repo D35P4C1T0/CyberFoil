@@ -20,7 +20,7 @@ A NSP, NSZ, XCI, & XCZ Installer with basic eShop support for Nintendo Switch
 - Installs NSP/NSZ/XCI/XCZ files over MTP (USB file transfer)
 - Verifies NCAs by header signature before they're installed
 - Installs and manages the latest signature patches quickly and easily
-- Ownfoil-compatible eShop with sections, search, and cover art previews
+- Built-in eShop with sections, search, and cover art previews
 - OLED mode for pure-black backgrounds
 - Forked from Awoo Installer [Huntereb Awoo Installer](https://github.com/Huntereb/Awoo-Installer)
 - Based on [Adubbz Tinfoil](https://github.com/Adubbz/Tinfoil)
@@ -31,13 +31,11 @@ Because Tinfoil is no longer being supported and not updated for the new firmwar
 
 If you want to do other things like manage installed tickets, titles, and user accounts, check out [Goldleaf](https://github.com/XorTroll/Goldleaf)!
 
-## Ownfoil eShop
-CyberFoil supports an Ownfoil-compatible eShop with sections, search, and cover art previews.
-
-Ownfoil fork that has been enhanced to work with this -> [Ownfoil](https://github.com/luketanti/ownfoil)
+## eShop
+CyberFoil supports an eShop with sections, search, and cover art previews.
 
 Setup:
-- Run Ownfoil and note its host/port (example: `http://192.168.1.2:8465`).
+- Run your shop backend and note its host/port (example: `http://192.168.1.2:8465`).
 - In CyberFoil settings, set Shop URL, Username, and Password (optional).
 - If your shop is private, make sure credentials are correct.
 
@@ -57,7 +55,7 @@ Install flow:
 - CyberFoil can prompt to include available updates for selected titles.
 
 Notes:
-- Encrypted Ownfoil responses are not supported.
+- Encrypted shop responses are not supported.
 - The Installed section lists content already on the Switch and cannot be installed from.
 - The shop list is cached for faster startup (5-minute TTL). Use X to refresh.
 
@@ -123,7 +121,7 @@ Screenshots:
  - Improve MTP robustness and host compatibility
 - Add support for switching between multiple shops
 - Preload title images and banners to cache for a faster UI experience
-- Create a beginner-friendly video tutorial for the complete setup (CyberFoil and Ownfoil)
+- Create a beginner-friendly video tutorial for the complete setup (CyberFoil and shop backend)
 
 
 

@@ -909,11 +909,11 @@ namespace shopInstStuff {
             return false;
         }
         if (fetch.responseCode == 401 || fetch.responseCode == 403) {
-            error = "Shop requires authentication. Check credentials or enable public shop in Ownfoil.";
+            error = "Shop requires authentication. Check credentials or enable public shop in eShop.";
             return false;
         }
         if (IsLoginUrl(fetch.effectiveUrl.c_str()) || (!fetch.contentType.empty() && fetch.contentType.find("text/html") != std::string::npos) || ContainsHtml(fetch.body)) {
-            error = "Ownfoil returned the login page. Check shop URL, username, and password, or enable public shop.";
+            error = "eShop returned the login page. Check shop URL, username, and password, or enable public shop.";
             return false;
         }
         if (fetch.body.rfind("TINFOIL", 0) == 0) {
