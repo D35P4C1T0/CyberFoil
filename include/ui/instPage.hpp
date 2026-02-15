@@ -53,6 +53,7 @@ namespace inst::ui {
             Rectangle::Ref infoRect;
             Rectangle::Ref topRect;
             Rectangle::Ref botRect;
+            void setupInstallHint();
             BottomHintTouchState bottomHintTouch;
             std::vector<BottomHintSegment> bottomHintSegments;
     };

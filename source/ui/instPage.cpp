@@ -2,6 +2,7 @@
 #include "ui/MainApplication.hpp"
 #include "ui/instPage.hpp"
 #include "util/config.hpp"
+#include "util/install_control.hpp"
 #include "mtp_server.hpp"
 #include "ui/bottomHint.hpp"
 #include <switch.h>
@@ -15,6 +16,7 @@ namespace inst::ui {
     constexpr int kInstallIconSize = 256;
     constexpr int kInstallIconX = (1280 - kInstallIconSize) / 2;
     constexpr int kInstallIconY = 220;
+    constexpr const char* kInstallBackHintText = " Back";
 
     instPage::instPage() : Layout::Layout() {
         if (inst::config::oledMode) {
@@ -207,7 +209,15 @@ namespace inst::ui {
         mainApp->CallForRender();
     }
 
+    void instPage::setupInstallHint(){
+        this->hintText->SetText(kInstallBackHintText);
+        this->hintText->SetX(1280 - 10 - this->hintText->GetTextWidth());
+        this->hintText->SetVisible(false);
+        this->bottomHintSegments = BuildBottomHintSegments(this->hintText->GetText(), this->hintText->GetX(), 20);
+    }
+
     void instPage::loadMainMenu(){
+        inst::install_control::EndSession();
         if (lastLayoutBeforeInstall != nullptr && lastLayoutBeforeInstall != mainApp->instpage)
             mainApp->LoadLayout(lastLayoutBeforeInstall);
         else
@@ -218,11 +228,12 @@ namespace inst::ui {
         auto currentLayout = mainApp->GetCurrentLayout();
         if (currentLayout != nullptr && currentLayout != mainApp->instpage)
             lastLayoutBeforeInstall = currentLayout;
+        inst::install_control::BeginSession();
         mainApp->instpage->pageInfoText->SetText("");
         mainApp->instpage->installInfoText->SetText("");
         mainApp->instpage->installBar->SetProgress(0);
         mainApp->instpage->installBar->SetVisible(false);
-        mainApp->instpage->hintText->SetVisible(false);
+        mainApp->instpage->setupInstallHint();
         mainApp->instpage->progressText->SetVisible(false);
         mainApp->instpage->progressDetailText->SetVisible(false);
         mainApp->instpage->installIconImage->SetVisible(false);
@@ -235,6 +246,12 @@ namespace inst::ui {
         int bottomTapX = 0;
         if (DetectBottomHintTap(Pos, this->bottomHintTouch, 668, 52, bottomTapX)) {
             Down |= FindBottomHintButton(this->bottomHintSegments, bottomTapX);
+        }
+        if (inst::install_control::IsSessionActive()) {
+            if ((Down & HidNpadButton_B) && inst::mtp::IsInstallServerRunning()) {
+                inst::mtp::StopInstallServer();
+            }
+            return;
         }
         if (Down & HidNpadButton_B) {
             if (inst::mtp::IsInstallServerRunning()) {
