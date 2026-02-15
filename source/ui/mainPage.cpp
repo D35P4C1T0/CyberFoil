@@ -29,6 +29,10 @@ namespace inst::ui {
     constexpr int kMainGridGapY = 18;
     constexpr int kMainGridStartX = (1280 - ((kMainGridCols * kMainGridTileWidth) + ((kMainGridCols - 1) * kMainGridGapX))) / 2;
     constexpr int kMainGridStartY = 100;
+    constexpr int kMainLabelPaddingX = 18;
+    constexpr int kMainLabelY = 116;
+    constexpr int kMainLabelWidth = kMainGridTileWidth - (kMainLabelPaddingX * 2);
+    constexpr int kMainLabelHeight = 28;
 
     void mainMenuThread() {
         bool menuLoaded = mainApp->IsShown();
@@ -200,9 +204,10 @@ namespace inst::ui {
             auto icon = Image::New(x + ((kMainGridTileWidth - kMainIconSize) / 2), y + 22, gridIcons[i]);
             icon->SetWidth(kMainIconSize);
             icon->SetHeight(kMainIconSize);
-            auto label = TextBlock::New(0, y + 116, gridLabels[i], 22);
-            label->SetX(x + ((kMainGridTileWidth - label->GetTextWidth()) / 2));
-            label->SetColor(COLOR("#FFFFFFFF"));
+            auto label = OverflowText::New(22, COLOR("#FFFFFFFF"));
+            label->SetBounds(x + kMainLabelPaddingX, y + kMainLabelY, kMainLabelWidth, kMainLabelHeight);
+            label->SetBackgroundColor(tileColor);
+            label->SetText(gridLabels[i]);
             this->mainGridTiles.push_back(tile);
             this->mainGridIcons.push_back(icon);
             this->mainGridLabels.push_back(label);
@@ -238,11 +243,14 @@ namespace inst::ui {
         for (auto& icon : this->mainGridIcons)
             this->Add(icon);
         for (auto& label : this->mainGridLabels)
-            this->Add(label);
+            label->Attach(this);
         this->Add(this->mainGridHighlight);
         this->awooImage->SetVisible(!inst::config::gayMode);
         this->updateMainGridSelection();
         this->AddThread(mainMenuThread);
+        this->AddThread([this]() {
+            this->updateMainGridLabelEffects(false);
+        });
     }
 
     void MainPage::installMenuItem_Click() {
@@ -327,6 +335,15 @@ namespace inst::ui {
         const int y = kMainGridStartY + (row * (kMainGridTileHeight + kMainGridGapY));
         this->mainGridHighlight->SetX(x - 4);
         this->mainGridHighlight->SetY(y - 4);
+        this->updateMainGridLabelEffects(true);
+    }
+
+    void MainPage::updateMainGridLabelEffects(bool force) {
+        for (std::size_t i = 0; i < this->mainGridLabels.size(); i++) {
+            const bool selected = (static_cast<int>(i) == this->selectedMainIndex);
+            this->mainGridLabels[i]->SetSelected(selected, force);
+            this->mainGridLabels[i]->Update(force);
+        }
     }
 
     int MainPage::getMainGridIndexFromTouch(int x, int y) const {

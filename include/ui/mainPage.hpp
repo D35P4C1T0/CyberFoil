@@ -1,6 +1,7 @@
 #pragma once
 #include <pu/Plutonium>
 #include "ui/bottomHint.hpp"
+#include "ui/overflowText.hpp"
 
 using namespace pu::ui::elm;
 namespace inst::ui {
@@ -63,10 +64,11 @@ namespace inst::ui {
             pu::ui::elm::MenuItem::Ref exitMenuItem;
             std::vector<Rectangle::Ref> mainGridTiles;
             std::vector<Image::Ref> mainGridIcons;
-            std::vector<TextBlock::Ref> mainGridLabels;
+            std::vector<OverflowText::Ref> mainGridLabels;
             Rectangle::Ref mainGridHighlight;
             int selectedMainIndex = 0;
             void updateMainGridSelection();
+            void updateMainGridLabelEffects(bool force);
             int getMainGridIndexFromTouch(int x, int y) const;
             void activateSelectedMainItem();
             void showSelectedMainInfo();
