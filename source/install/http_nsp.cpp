@@ -64,6 +64,7 @@ namespace tin::install::nsp
     }
 
     bool stopThreadsHttpNsp;
+    std::string errorMessageHttpNsp;
 
     HTTPNSP::HTTPNSP(std::string url) :
         m_download(url)
@@ -85,17 +86,25 @@ namespace tin::install::nsp
 
         auto streamFunc = [&](u8* streamBuf, size_t streamBufSize) -> size_t
         {
-            while (true)
+            while (!stopThreadsHttpNsp)
             {
                 if (args->bufferedPlaceholderWriter->CanAppendData(streamBufSize))
                     break;
             }
 
+            if (stopThreadsHttpNsp)
+                return 0;
+
             args->bufferedPlaceholderWriter->AppendData(streamBuf, streamBufSize);
             return streamBufSize;
         };
 
-        if (args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc) == 1) stopThreadsHttpNsp = true;
+        if (args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc) == 1) {
+            stopThreadsHttpNsp = true;
+            if (errorMessageHttpNsp.empty()) {
+                errorMessageHttpNsp = "inst.net.transfer_interput"_lang;
+            }
+        }
         return 0;
     }
 
@@ -130,6 +139,7 @@ namespace tin::install::nsp
         thrd_t writeThread;
 
         stopThreadsHttpNsp = false;
+        errorMessageHttpNsp.clear();
         thrd_create(&curlThread, CurlStreamFunc, &args);
         thrd_create(&writeThread, PlaceholderWriteFunc, &args);
 
@@ -194,7 +204,10 @@ namespace tin::install::nsp
 
         thrd_join(curlThread, NULL);
         thrd_join(writeThread, NULL);
-        if (stopThreadsHttpNsp) THROW_FORMAT(("inst.net.transfer_interput"_lang).c_str());
+        if (stopThreadsHttpNsp) {
+            const std::string& msg = errorMessageHttpNsp.empty() ? ("inst.net.transfer_interput"_lang) : errorMessageHttpNsp;
+            THROW_FORMAT(msg.c_str());
+        }
     }
 
     void HTTPNSP::BufferData(void* buf, off_t offset, size_t size)

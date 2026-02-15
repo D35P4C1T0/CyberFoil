@@ -62,6 +62,7 @@ namespace {
         });
         return ok;
     }
+
 }
 
 namespace inst::ui {
@@ -142,7 +143,8 @@ namespace netInstStuff{
         NcmStorageId m_destStorageId = NcmStorageId_SdCard;
 
         if (ourStorage) m_destStorageId = NcmStorageId_BuiltInUser;
-        unsigned int urlItr;
+        unsigned int urlItr = 0;
+        std::string currentName;
 
         std::vector<std::string> urlNames;
         if (urlListAltNames.size() > 0) {
@@ -165,7 +167,8 @@ namespace netInstStuff{
         try {
             for (urlItr = 0; urlItr < ourUrlList.size(); urlItr++) {
                 LOG_DEBUG("%s %s\n", "Install request from", ourUrlList[urlItr].c_str());
-                inst::ui::instPage::setTopInstInfoText("inst.info_page.top_info0"_lang + urlNames[urlItr] + ourSource);
+                currentName = urlNames[urlItr];
+                inst::ui::instPage::setTopInstInfoText("inst.info_page.top_info0"_lang + currentName + ourSource);
                 std::unique_ptr<tin::install::Install> installTask;
 
                 if (inst::curl::downloadToBuffer(ourUrlList[urlItr], 0x100, 0x103) == "HEAD") {
@@ -187,13 +190,15 @@ namespace netInstStuff{
             LOG_DEBUG("Failed to install");
             LOG_DEBUG("%s", e.what());
             fprintf(stdout, "%s", e.what());
-            inst::ui::instPage::setInstInfoText("inst.info_page.failed"_lang + urlNames[urlItr]);
+            if (currentName.empty() && !urlNames.empty())
+                currentName = urlNames.front();
+            inst::ui::instPage::setInstInfoText("inst.info_page.failed"_lang + currentName);
             inst::ui::instPage::setInstBarPerc(0);
             std::string audioPath = "romfs:/audio/bark.wav";
             if (!inst::config::soundEnabled) audioPath = "";
             if (std::filesystem::exists(inst::config::appDir + "/bark.wav")) audioPath = inst::config::appDir + "/bark.wav";
             std::thread audioThread(inst::util::playAudio,audioPath);
-            inst::ui::mainApp->CreateShowDialog("inst.info_page.failed"_lang + urlNames[urlItr] + "!", "inst.info_page.failed_desc"_lang + "\n\n" + (std::string)e.what(), {"common.ok"_lang}, true);
+            inst::ui::mainApp->CreateShowDialog("inst.info_page.failed"_lang + currentName + "!", "inst.info_page.failed_desc"_lang + "\n\n" + (std::string)e.what(), {"common.ok"_lang}, true);
             audioThread.join();
             nspInstalled = false;
         }

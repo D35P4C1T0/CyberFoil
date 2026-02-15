@@ -72,6 +72,7 @@ namespace tin::install::xci
             inst::ui::instPage::setInstBarPerc(100);
         } catch (std::exception& e) {
             LOG_DEBUG("something went wrong: %s\n", e.what());
+            throw;
         }
 
         writer.close();
