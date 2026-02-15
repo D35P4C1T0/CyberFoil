@@ -142,7 +142,7 @@ namespace inst::ui {
             void updateSectionText();
             void updateButtonsText();
             void setButtonsText(const std::string& text);
-            std::string buildListMenuLabel(const shopInstStuff::ShopItem& item) const;
+            std::string buildListMenuLabel(const shopInstStuff::ShopItem& item);
             void updateListMarquee(bool force);
             void buildInstalledSection();
             void buildLegacyOwnedSections();

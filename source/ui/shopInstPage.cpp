@@ -136,7 +136,8 @@ namespace {
         out.reserve(title.size());
         bool previousWasSpace = false;
         for (char c : title) {
-            const bool isWhitespace = (c == ' ' || c == '\t' || c == '\r' || c == '\n');
+            const unsigned char uc = static_cast<unsigned char>(c);
+            const bool isWhitespace = (std::isspace(uc) != 0) || (uc < 0x20) || (uc == 0x7F);
             if (isWhitespace) {
                 if (!out.empty() && !previousWasSpace)
                     out.push_back(' ');
@@ -1039,14 +1040,46 @@ namespace inst::ui {
         this->loadingBarFill->SetWidth((500 * percent) / 100);
     }
 
-    std::string shopInstPage::buildListMenuLabel(const shopInstStuff::ShopItem& item) const
+    std::string shopInstPage::buildListMenuLabel(const shopInstStuff::ShopItem& item)
     {
         const std::string normalizedName = NormalizeSingleLineTitle(item.name);
         std::string sizeText = FormatSizeText(item.size);
         std::string suffix = sizeText.empty() ? "" : (" [" + sizeText + "]");
         int nameLimit = ComputeListNameLimit(suffix);
+        std::string label = inst::util::shortenString(normalizedName, nameLimit, true) + suffix;
 
-        return inst::util::shortenString(normalizedName, nameLimit, true) + suffix;
+        if (this->listMarqueeOverlayText == nullptr || this->menu == nullptr)
+            return label;
+
+        constexpr int kMaxMenuLabelWidth = 1240;
+        const int maxMenuLabelHeight = this->menu->GetItemSize() - 2;
+        auto fitsSingleLine = [&](const std::string& candidate) {
+            this->listMarqueeOverlayText->SetText(candidate);
+            return (this->listMarqueeOverlayText->GetTextWidth() <= kMaxMenuLabelWidth)
+                && (this->listMarqueeOverlayText->GetTextHeight() <= maxMenuLabelHeight);
+        };
+
+        if (fitsSingleLine(label))
+            return label;
+
+        int low = 0;
+        int high = static_cast<int>(normalizedName.size());
+        int best = -1;
+        while (low <= high) {
+            const int mid = low + ((high - low) / 2);
+            const std::string candidate = inst::util::shortenString(normalizedName, mid, true) + suffix;
+            if (fitsSingleLine(candidate)) {
+                best = mid;
+                low = mid + 1;
+            } else {
+                high = mid - 1;
+            }
+        }
+
+        if (best < 0)
+            return suffix;
+
+        return inst::util::shortenString(normalizedName, best, true) + suffix;
     }
 
     void shopInstPage::updateListMarquee(bool force)
