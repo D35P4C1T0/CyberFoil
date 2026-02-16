@@ -29,6 +29,7 @@
 #include "util/json.hpp"
 #include "util/lang.hpp"
 #include "util/network_util.hpp"
+#include "util/uid.hpp"
 #include "util/util.hpp"
 
 namespace inst::ui {
@@ -138,9 +139,10 @@ namespace {
         std::string revisionHeader = "Revision: " + revisionValue;
         std::string languageHeader = "Language: " + Language::GetShopHeaderLanguage();
         std::string hauthHeader = "HAUTH: " + inst::util::ComputeHauthFromUrl(requestUrl);
+        std::string uidHeader = "UID: " + inst::util::ComputeUidFromMmcCid();
         return {
             themeHeader,
-            "UID: 0000000000000000000000000000000000000000000000000000000000000000",
+            uidHeader,
             versionHeader,
             revisionHeader,
             languageHeader,

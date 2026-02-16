@@ -13,6 +13,7 @@
 #include "util/error.hpp"
 #include "util/hauth.hpp"
 #include "util/lang.hpp"
+#include "util/uid.hpp"
 #include "ui/instPage.hpp"
 
 static size_t writeDataFile(void *ptr, size_t size, size_t nmemb, void *stream) {
@@ -86,9 +87,10 @@ static std::vector<std::string> buildShopHeaders(const std::string& requestUrl)
     std::string revisionHeader = "Revision: " + revisionValue;
     std::string languageHeader = "Language: " + Language::GetShopHeaderLanguage();
     std::string hauthHeader = "HAUTH: " + inst::util::ComputeHauthFromUrl(requestUrl);
+    std::string uidHeader = "UID: " + inst::util::ComputeUidFromMmcCid();
     return {
         themeHeader,
-        "UID: 0000000000000000000000000000000000000000000000000000000000000000",
+        uidHeader,
         versionHeader,
         revisionHeader,
         languageHeader,
