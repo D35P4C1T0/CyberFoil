@@ -1,4 +1,6 @@
 #include <filesystem>
+#include <cstdio>
+#include <cstring>
 #include <switch.h>
 #include "ui/MainApplication.hpp"
 #include "ui/mainPage.hpp"
@@ -6,6 +8,7 @@
 #include "util/util.hpp"
 #include "util/config.hpp"
 #include "util/offline_db_update.hpp"
+#include "util/save_sync.hpp"
 #include "util/error.hpp"
 #include "util/lang.hpp"
 #include "data/buffered_placeholder_writer.hpp"
@@ -28,6 +31,88 @@ namespace inst::ui {
     constexpr int kMainGridGapY = 18;
     constexpr int kMainGridStartX = (1280 - ((kMainGridCols * kMainGridTileWidth) + ((kMainGridCols - 1) * kMainGridGapX))) / 2;
     constexpr int kMainGridStartY = 100;
+
+    struct BackupUserChoice {
+        AccountUid uid = {};
+        std::string label;
+        bool isPreferred = false;
+    };
+
+    bool AccountUidEqualsLocal(const AccountUid& a, const AccountUid& b)
+    {
+        return a.uid[0] == b.uid[0] && a.uid[1] == b.uid[1];
+    }
+
+    std::string GetAccountNickname(AccountUid uid)
+    {
+        AccountProfile profile = {};
+        if (R_FAILED(accountGetProfile(&profile, uid)))
+            return std::string();
+
+        AccountProfileBase profileBase = {};
+        const bool ok = R_SUCCEEDED(accountProfileGet(&profile, nullptr, &profileBase));
+        accountProfileClose(&profile);
+        if (!ok)
+            return std::string();
+
+        const std::size_t len = strnlen(profileBase.nickname, sizeof(profileBase.nickname));
+        if (len == 0)
+            return std::string();
+        return std::string(profileBase.nickname, len);
+    }
+
+    bool ListBackupUsers(std::vector<BackupUserChoice>& outUsers, std::string& error)
+    {
+        outUsers.clear();
+        error.clear();
+
+        Result rc = accountInitialize(AccountServiceType_Application);
+        if (R_FAILED(rc)) {
+            char code[16] = {0};
+            std::snprintf(code, sizeof(code), "0x%08X", rc);
+            error = "Failed to initialize account service (" + std::string(code) + ").";
+            return false;
+        }
+
+        AccountUid preferredUid = {};
+        bool preferredSet = false;
+        if (R_SUCCEEDED(accountGetPreselectedUser(&preferredUid)) && accountUidIsValid(&preferredUid))
+            preferredSet = true;
+        else if (R_SUCCEEDED(accountGetLastOpenedUser(&preferredUid)) && accountUidIsValid(&preferredUid))
+            preferredSet = true;
+
+        AccountUid users[ACC_USER_LIST_SIZE] = {};
+        s32 total = 0;
+        if (R_FAILED(accountListAllUsers(users, ACC_USER_LIST_SIZE, &total)) || total <= 0) {
+            accountExit();
+            error = "No user accounts are available.";
+            return false;
+        }
+
+        int displayIndex = 1;
+        for (s32 i = 0; i < total; i++) {
+            if (!accountUidIsValid(&users[i]))
+                continue;
+            BackupUserChoice choice;
+            choice.uid = users[i];
+            choice.isPreferred = preferredSet && AccountUidEqualsLocal(preferredUid, users[i]);
+            std::string nickname = GetAccountNickname(users[i]);
+            if (nickname.empty())
+                nickname = "User " + std::to_string(displayIndex);
+            choice.label = nickname;
+            if (choice.isPreferred)
+                choice.label += " [active]";
+            outUsers.push_back(std::move(choice));
+            displayIndex++;
+        }
+
+        accountExit();
+        if (outUsers.empty()) {
+            error = "No valid user accounts were found.";
+            return false;
+        }
+        return true;
+    }
 
     void mainMenuThread() {
         bool menuLoaded = mainApp->IsShown();
@@ -135,6 +220,23 @@ namespace inst::ui {
         this->butText = TextBlock::New(10, 678, mainButtonsText, 20);
         this->butText->SetColor(COLOR("#FFFFFFFF"));
         this->bottomHintSegments = BuildBottomHintSegments(mainButtonsText, 10, 20);
+        this->backupUserPickerRect = Rectangle::New(196, 102, 888, 516, inst::config::oledMode ? COLOR("#000000EE") : COLOR("#170909EE"));
+        this->backupUserPickerRect->SetVisible(false);
+        this->backupUserPickerTitle = TextBlock::New(222, 124, "Select user account to back up", 24);
+        this->backupUserPickerTitle->SetColor(COLOR("#FFFFFFFF"));
+        this->backupUserPickerTitle->SetVisible(false);
+        this->optionMenu = pu::ui::elm::Menu::New(222, 168, 836, COLOR("#FFFFFF00"), 50, 7, 22);
+        if (inst::config::oledMode) {
+            this->optionMenu->SetOnFocusColor(COLOR("#FFFFFF33"));
+            this->optionMenu->SetScrollbarColor(COLOR("#FFFFFF66"));
+        } else {
+            this->optionMenu->SetOnFocusColor(COLOR("#00000033"));
+            this->optionMenu->SetScrollbarColor(COLOR("#17090980"));
+        }
+        this->optionMenu->SetVisible(false);
+        this->backupUserPickerHint = TextBlock::New(222, 584, "A Select    B Cancel", 18);
+        this->backupUserPickerHint->SetColor(COLOR("#FFFFFFFF"));
+        this->backupUserPickerHint->SetVisible(false);
         this->installMenuItem = pu::ui::elm::MenuItem::New("main.menu.sd"_lang);
         this->installMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->installMenuItem->SetIcon("romfs:/images/icons/micro-sd.png");
@@ -239,6 +341,10 @@ namespace inst::ui {
         for (auto& label : this->mainGridLabels)
             this->Add(label);
         this->Add(this->mainGridHighlight);
+        this->Add(this->backupUserPickerRect);
+        this->Add(this->backupUserPickerTitle);
+        this->Add(this->optionMenu);
+        this->Add(this->backupUserPickerHint);
         this->awooImage->SetVisible(!inst::config::gayMode);
         this->updateMainGridSelection();
         this->AddThread(mainMenuThread);
@@ -302,7 +408,177 @@ namespace inst::ui {
     }
 
     void MainPage::backupSaveDataMenuItem_Click() {
-        mainApp->CreateShowDialog("Backup Save Data", "Coming soon.", {"common.ok"_lang}, true);
+        if (inst::util::getIPAddress() == "1.0.0.127") {
+            inst::ui::mainApp->CreateShowDialog("main.net.title"_lang, "main.net.desc"_lang, {"common.ok"_lang}, true);
+            return;
+        }
+
+        std::vector<BackupUserChoice> users;
+        std::string userError;
+        if (!ListBackupUsers(users, userError)) {
+            mainApp->CreateShowDialog("Backup Save Data", userError.empty() ? "Unable to read user accounts." : userError, {"common.ok"_lang}, true);
+            return;
+        }
+
+        std::vector<std::string> userLabels;
+        userLabels.reserve(users.size());
+        int preferredUserIndex = 0;
+        for (std::size_t i = 0; i < users.size(); i++) {
+            userLabels.push_back(users[i].label);
+            if (users[i].isPreferred)
+                preferredUserIndex = static_cast<int>(i);
+        }
+
+        const int selectedUserIndex = this->promptBackupUserSelection(userLabels, preferredUserIndex);
+        if (selectedUserIndex < 0 || selectedUserIndex >= static_cast<int>(users.size()))
+            return;
+        const AccountUid selectedUid = users[static_cast<std::size_t>(selectedUserIndex)].uid;
+
+        std::string shopUrl = inst::config::shopUrl;
+        if (shopUrl.empty()) {
+            std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
+            if (!shops.empty() && inst::config::SetActiveShop(shops.front(), true))
+                shopUrl = inst::config::shopUrl;
+        }
+        if (shopUrl.empty()) {
+            shopUrl = inst::util::softwareKeyboard("options.shop.url_hint"_lang, "http://", 200);
+            if (shopUrl.empty())
+                return;
+            inst::config::shopUrl = shopUrl;
+            inst::config::setConfig();
+        }
+
+        std::string backupNote = inst::util::softwareKeyboard("Backup note (required)", "", 120);
+        auto trimAscii = [](const std::string& value) {
+            const std::size_t start = value.find_first_not_of(" \t\r\n");
+            if (start == std::string::npos)
+                return std::string();
+            const std::size_t end = value.find_last_not_of(" \t\r\n");
+            return value.substr(start, (end - start) + 1);
+        };
+        backupNote = trimAscii(backupNote);
+        if (backupNote.empty()) {
+            mainApp->CreateShowDialog("Backup Save Data", "Backup canceled. A note is required.", {"common.ok"_lang}, true);
+            return;
+        }
+
+        inst::ui::instPage::loadInstallScreen();
+        inst::ui::instPage::setTopInstInfoText("Backup Save Data");
+        inst::ui::instPage::setInstInfoText("Loading backup data...");
+        inst::ui::instPage::setProgressDetailText("Fetching server save metadata...");
+        inst::ui::instPage::setInstBarPerc(10);
+
+        std::vector<shopInstStuff::ShopItem> remoteSaveItems;
+        std::string remoteFetchWarning;
+        inst::save_sync::FetchRemoteSaveItems(shopUrl, inst::config::shopUser, inst::config::shopPass, remoteSaveItems, remoteFetchWarning);
+
+        inst::ui::instPage::setInstInfoText("Scanning local saves...");
+        inst::ui::instPage::setProgressDetailText("Reading saves for selected user...");
+        inst::ui::instPage::setInstBarPerc(45);
+
+        std::vector<inst::save_sync::SaveSyncEntry> entries;
+        std::string buildWarning;
+        inst::save_sync::BuildEntriesForUser(remoteSaveItems, &selectedUid, entries, buildWarning);
+
+        inst::ui::instPage::setInstInfoText("Preparing upload list...");
+        inst::ui::instPage::setProgressDetailText("Filtering local save entries...");
+        inst::ui::instPage::setInstBarPerc(75);
+
+        std::vector<const inst::save_sync::SaveSyncEntry*> localEntries;
+        localEntries.reserve(entries.size());
+        for (const auto& entry : entries) {
+            if (entry.localAvailable)
+                localEntries.push_back(&entry);
+        }
+        inst::ui::instPage::setInstBarPerc(100);
+        inst::ui::instPage::setProgressDetailText("Ready.");
+
+        if (localEntries.empty()) {
+            inst::ui::instPage::clearProgressDetailText();
+            mainApp->LoadLayout(mainApp->mainPage);
+            mainApp->CreateShowDialog(
+                "Backup Save Data",
+                "No local save data found for the active user.\nLaunch games once to create save data, then retry.",
+                {"common.ok"_lang},
+                true);
+            return;
+        }
+
+        std::string shopDisplayName;
+        std::vector<inst::config::ShopProfile> shops = inst::config::LoadShops();
+        for (const auto& shop : shops) {
+            if (inst::config::BuildShopUrl(shop) == shopUrl &&
+                shop.username == inst::config::shopUser &&
+                shop.password == inst::config::shopPass) {
+                shopDisplayName = shop.title;
+                break;
+            }
+        }
+        if (shopDisplayName.empty())
+            shopDisplayName = shopUrl;
+
+        inst::ui::instPage::clearProgressDetailText();
+        mainApp->LoadLayout(mainApp->mainPage);
+        const int confirm = mainApp->CreateShowDialog(
+            "Backup Save Data",
+            "Upload all local saves to the server now?\n"
+            "Shop: " + inst::util::shortenString(shopDisplayName, 86, false) + "\n"
+            "Saves to upload: " + std::to_string(localEntries.size()),
+            {"Upload All", "common.cancel"_lang},
+            false);
+        if (confirm != 0)
+            return;
+
+        inst::ui::instPage::loadInstallScreen();
+        inst::ui::instPage::setTopInstInfoText("Backup Save Data");
+        inst::ui::instPage::setInstInfoText("Preparing uploads...");
+        inst::ui::instPage::setInstBarPerc(0);
+        inst::ui::instPage::setProgressDetailText("0/" + std::to_string(localEntries.size()));
+
+        std::size_t uploadedCount = 0;
+        std::vector<std::string> failedTitles;
+        std::string firstError;
+        for (std::size_t i = 0; i < localEntries.size(); i++) {
+            const auto* entry = localEntries[i];
+            const std::size_t current = i + 1;
+            const int progress = static_cast<int>((current * 100) / localEntries.size());
+            const std::string titleName = entry->titleName.empty() ? "Unknown title" : entry->titleName;
+            inst::ui::instPage::setInstallIconFromTitleId(entry->titleId);
+            inst::ui::instPage::setInstInfoText("Uploading " + std::to_string(current) + "/" + std::to_string(localEntries.size()) + ": " + inst::util::shortenString(titleName, 64, false));
+            inst::ui::instPage::setProgressDetailText(inst::util::shortenString(titleName, 68, false));
+            inst::ui::instPage::setInstBarPerc(progress);
+
+            std::string error;
+            if (inst::save_sync::UploadSaveToServerForUser(shopUrl, inst::config::shopUser, inst::config::shopPass, &selectedUid, *entry, backupNote, error)) {
+                uploadedCount++;
+                continue;
+            }
+
+            failedTitles.push_back(entry->titleName.empty() ? "Unknown title" : entry->titleName);
+            if (firstError.empty())
+                firstError = error;
+        }
+
+        std::string summary = "Uploaded " + std::to_string(uploadedCount) + " of " + std::to_string(localEntries.size()) + " saves.";
+        if (!failedTitles.empty()) {
+            summary += "\nFailed: " + std::to_string(failedTitles.size());
+            summary += "\nFirst failure: " + (firstError.empty() ? "Save upload failed." : firstError);
+            summary += "\nExamples:";
+            const std::size_t maxList = failedTitles.size() < 3 ? failedTitles.size() : 3;
+            for (std::size_t i = 0; i < maxList; i++)
+                summary += "\n- " + inst::util::shortenString(failedTitles[i], 56, false);
+        }
+        if (uploadedCount > 0) {
+            const std::string warning = !buildWarning.empty() ? buildWarning : remoteFetchWarning;
+            if (!warning.empty())
+                summary += "\nWarning: " + warning;
+        }
+        inst::ui::instPage::setInstBarPerc(100);
+        inst::ui::instPage::setInstInfoText("Backup complete.");
+        inst::ui::instPage::clearProgressDetailText();
+        inst::ui::instPage::clearInstallIcon();
+        mainApp->LoadLayout(mainApp->mainPage);
+        mainApp->CreateShowDialog("Backup Save Data", summary, {"common.ok"_lang}, true);
     }
 
     void MainPage::exitMenuItem_Click() {
@@ -337,6 +613,62 @@ namespace inst::ui {
             if (x >= tx && x <= (tx + kMainGridTileWidth) && y >= ty && y <= (ty + kMainGridTileHeight))
                 return i;
         }
+        return -1;
+    }
+
+    void MainPage::setBackupUserPickerVisible(bool visible) {
+        this->backupUserPickerRect->SetVisible(visible);
+        this->backupUserPickerTitle->SetVisible(visible);
+        this->optionMenu->SetVisible(visible);
+        this->backupUserPickerHint->SetVisible(visible);
+        mainApp->CallForRender();
+    }
+
+    int MainPage::promptBackupUserSelection(const std::vector<std::string>& userLabels, int preferredIndex) {
+        if (userLabels.empty())
+            return -1;
+        if (userLabels.size() == 1)
+            return 0;
+
+        this->optionMenu->ClearItems();
+        for (const auto& label : userLabels) {
+            auto item = pu::ui::elm::MenuItem::New(inst::util::shortenString(label, 72, false));
+            item->SetColor(COLOR("#FFFFFFFF"));
+            this->optionMenu->AddItem(item);
+        }
+
+        if (preferredIndex < 0 || preferredIndex >= static_cast<int>(userLabels.size()))
+            preferredIndex = 0;
+        this->optionMenu->SetSelectedIndex(preferredIndex);
+        this->setBackupUserPickerVisible(true);
+
+        // Ignore the initial A press used to open this picker.
+        bool waitARelease = true;
+        while (mainApp->IsShown()) {
+            mainApp->CallForRender();
+            const u64 down = mainApp->GetButtonsDown();
+            const u64 held = mainApp->GetButtonsHeld();
+
+            if (waitARelease) {
+                if ((held & HidNpadButton_A) == 0)
+                    waitARelease = false;
+            } else if (down & HidNpadButton_A) {
+                const int selected = this->optionMenu->GetSelectedIndex();
+                this->setBackupUserPickerVisible(false);
+                this->optionMenu->ClearItems();
+                return selected;
+            }
+
+            if (down & (HidNpadButton_B | HidNpadButton_Plus | HidNpadButton_Minus)) {
+                this->setBackupUserPickerVisible(false);
+                this->optionMenu->ClearItems();
+                return -1;
+            }
+            svcSleepThread(10'000'000);
+        }
+
+        this->setBackupUserPickerVisible(false);
+        this->optionMenu->ClearItems();
         return -1;
     }
 
@@ -404,7 +736,15 @@ namespace inst::ui {
                 break;
             case 6:
                 title = "Backup Save Data";
-                desc = "Coming soon.";
+                desc =
+                    "Uploads all local save data for the active user to your shop server in one action.\n\n"
+                    "How it works:\n"
+                    "1. If multiple users exist, choose which account to back up.\n"
+                    "2. If no shop is configured, CyberFoil tries saved shop profiles first, then asks for a shop URL.\n"
+                    "3. You must enter a backup note (required).\n"
+                    "4. CyberFoil scans that user's local saves and uploads each one to the server.\n"
+                    "5. A progress screen shows current title and overall progress.\n"
+                    "6. A final summary reports uploaded and failed saves.";
                 break;
             case 7:
                 title = "main.menu.set"_lang;
@@ -421,6 +761,10 @@ namespace inst::ui {
     }
 
     void MainPage::onInput(u64 Down, u64 Up, u64 Held, pu::ui::Touch Pos) {
+        if (this->optionMenu != nullptr && this->optionMenu->IsVisible()) {
+            return;
+        }
+
         int bottomTapX = 0;
         if (DetectBottomHintTap(Pos, this->bottomHintTouch, 668, 52, bottomTapX)) {
             Down |= FindBottomHintButton(this->bottomHintSegments, bottomTapX);

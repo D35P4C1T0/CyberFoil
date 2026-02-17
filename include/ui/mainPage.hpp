@@ -51,6 +51,9 @@ namespace inst::ui {
             TextBlock::Ref butText;
             Rectangle::Ref topRect;
             Rectangle::Ref botRect;
+            Rectangle::Ref backupUserPickerRect;
+            TextBlock::Ref backupUserPickerTitle;
+            TextBlock::Ref backupUserPickerHint;
             pu::ui::elm::Menu::Ref optionMenu;
             pu::ui::elm::MenuItem::Ref installMenuItem;
             pu::ui::elm::MenuItem::Ref netInstallMenuItem;
@@ -68,6 +71,8 @@ namespace inst::ui {
             int selectedMainIndex = 0;
             void updateMainGridSelection();
             int getMainGridIndexFromTouch(int x, int y) const;
+            int promptBackupUserSelection(const std::vector<std::string>& userLabels, int preferredIndex);
+            void setBackupUserPickerVisible(bool visible);
             void activateSelectedMainItem();
             void showSelectedMainInfo();
     };

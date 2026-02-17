@@ -224,6 +224,16 @@ namespace {
         return false;
     }
 
+    bool ResolveRequestedOrActiveUser(const AccountUid* requestedUid, AccountUid& outUid, std::string& error)
+    {
+        error.clear();
+        if (requestedUid && accountUidIsValid(requestedUid)) {
+            outUid = *requestedUid;
+            return true;
+        }
+        return ResolveActiveUser(outUid, error);
+    }
+
     bool EnumerateLocalSaves(const AccountUid& uid, std::unordered_map<std::uint64_t, inst::save_sync::SaveSyncEntry>& entries, std::string& warning)
     {
         warning.clear();
@@ -990,18 +1000,18 @@ namespace inst::save_sync {
         return true;
     }
 
-    bool BuildEntries(const std::vector<shopInstStuff::ShopItem>& remoteItems, std::vector<SaveSyncEntry>& outEntries, std::string& warning)
+    bool BuildEntriesForUser(const std::vector<shopInstStuff::ShopItem>& remoteItems, const AccountUid* uid, std::vector<SaveSyncEntry>& outEntries, std::string& warning)
     {
         warning.clear();
         outEntries.clear();
 
         std::unordered_map<std::uint64_t, SaveSyncEntry> entriesByTitleId;
 
-        AccountUid uid = {};
+        AccountUid targetUid = {};
         std::string userError;
-        if (ResolveActiveUser(uid, userError)) {
+        if (ResolveRequestedOrActiveUser(uid, targetUid, userError)) {
             std::string localWarning;
-            EnumerateLocalSaves(uid, entriesByTitleId, localWarning);
+            EnumerateLocalSaves(targetUid, entriesByTitleId, localWarning);
             if (!localWarning.empty())
                 warning = localWarning;
         } else {
@@ -1071,7 +1081,12 @@ namespace inst::save_sync {
         return true;
     }
 
-    bool UploadSaveToServer(const std::string& shopUrl, const std::string& user, const std::string& pass, const SaveSyncEntry& entry, const std::string& note, std::string& error)
+    bool BuildEntries(const std::vector<shopInstStuff::ShopItem>& remoteItems, std::vector<SaveSyncEntry>& outEntries, std::string& warning)
+    {
+        return BuildEntriesForUser(remoteItems, nullptr, outEntries, warning);
+    }
+
+    bool UploadSaveToServerForUser(const std::string& shopUrl, const std::string& user, const std::string& pass, const AccountUid* uid, const SaveSyncEntry& entry, const std::string& note, std::string& error)
     {
         error.clear();
         if (entry.titleId == 0) {
@@ -1083,8 +1098,8 @@ namespace inst::save_sync {
             return false;
         }
 
-        AccountUid uid = {};
-        if (!ResolveActiveUser(uid, error))
+        AccountUid targetUid = {};
+        if (!ResolveRequestedOrActiveUser(uid, targetUid, error))
             return false;
 
         const std::string tempRoot = inst::config::appDir + "/save_sync_tmp";
@@ -1095,7 +1110,7 @@ namespace inst::save_sync {
 
         const std::string mountedPath = std::string(kSaveMountName) + ":/";
 
-        if (!MountSaveDataForTitle(uid, entry.titleId, true, error))
+        if (!MountSaveDataForTitle(targetUid, entry.titleId, true, error))
             return false;
 
         if (!CreateZipFromDirectory(mountedPath, archivePath, error)) {
@@ -1116,6 +1131,11 @@ namespace inst::save_sync {
 
         std::filesystem::remove_all(tempRoot, ec);
         return true;
+    }
+
+    bool UploadSaveToServer(const std::string& shopUrl, const std::string& user, const std::string& pass, const SaveSyncEntry& entry, const std::string& note, std::string& error)
+    {
+        return UploadSaveToServerForUser(shopUrl, user, pass, nullptr, entry, note, error);
     }
 
     bool DownloadSaveToConsole(const std::string& shopUrl, const std::string& user, const std::string& pass, const SaveSyncEntry& entry, const SaveSyncRemoteVersion* remoteVersion, std::string& error)
