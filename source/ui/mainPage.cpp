@@ -1,6 +1,7 @@
 #include <filesystem>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include <switch.h>
 #include "ui/MainApplication.hpp"
 #include "ui/mainPage.hpp"
@@ -112,6 +113,86 @@ namespace inst::ui {
             return false;
         }
         return true;
+    }
+
+    std::string WrapGridLabelText(const std::string& text, int maxWidth, int fontSize, int maxLines)
+    {
+        if (text.empty() || maxWidth <= 0 || maxLines <= 0)
+            return text;
+
+        auto measure = pu::ui::elm::TextBlock::New(0, 0, "", fontSize);
+        std::stringstream words(text);
+        std::string word;
+        std::vector<std::string> lines;
+        std::string line;
+
+        while (words >> word) {
+            std::string candidate = line.empty() ? word : (line + " " + word);
+            measure->SetText(candidate);
+            if (measure->GetTextWidth() <= maxWidth) {
+                line = candidate;
+                continue;
+            }
+
+            if (!line.empty()) {
+                lines.push_back(line);
+                line.clear();
+                if (static_cast<int>(lines.size()) >= maxLines)
+                    break;
+            }
+
+            measure->SetText(word);
+            if (measure->GetTextWidth() <= maxWidth) {
+                line = word;
+                continue;
+            }
+
+            std::string trimmed = word;
+            while (!trimmed.empty()) {
+                std::string candidateToken = trimmed + "...";
+                measure->SetText(candidateToken);
+                if (measure->GetTextWidth() <= maxWidth)
+                    break;
+                trimmed.pop_back();
+            }
+            line = trimmed.empty() ? "..." : (trimmed + "...");
+            lines.push_back(line);
+            line.clear();
+            break;
+        }
+
+        if (!line.empty() && static_cast<int>(lines.size()) < maxLines)
+            lines.push_back(line);
+
+        if (lines.empty())
+            lines.push_back(text);
+
+        if (static_cast<int>(lines.size()) > maxLines)
+            lines.resize(maxLines);
+
+        if (static_cast<int>(lines.size()) == maxLines) {
+            std::string& last = lines.back();
+            measure->SetText(last);
+            if (measure->GetTextWidth() > maxWidth) {
+                std::string trimmed = last;
+                while (!trimmed.empty()) {
+                    std::string candidateToken = trimmed + "...";
+                    measure->SetText(candidateToken);
+                    if (measure->GetTextWidth() <= maxWidth)
+                        break;
+                    trimmed.pop_back();
+                }
+                last = trimmed.empty() ? "..." : (trimmed + "...");
+            }
+        }
+
+        std::string wrapped;
+        for (std::size_t i = 0; i < lines.size(); i++) {
+            if (i > 0)
+                wrapped += "\n";
+            wrapped += lines[i];
+        }
+        return wrapped;
     }
 
     void mainMenuThread() {
@@ -301,7 +382,12 @@ namespace inst::ui {
             auto icon = Image::New(x + ((kMainGridTileWidth - kMainIconSize) / 2), y + 22, gridIcons[i]);
             icon->SetWidth(kMainIconSize);
             icon->SetHeight(kMainIconSize);
-            auto label = TextBlock::New(0, y + 116, gridLabels[i], 22);
+            std::string wrappedLabel = WrapGridLabelText(gridLabels[i], kMainGridTileWidth - 24, 22, 2);
+            auto label = TextBlock::New(0, 0, wrappedLabel, 22);
+            int labelY = y + (kMainGridTileHeight - label->GetTextHeight()) - 12;
+            if (labelY < (y + 112))
+                labelY = y + 112;
+            label->SetY(labelY);
             label->SetX(x + ((kMainGridTileWidth - label->GetTextWidth()) / 2));
             label->SetColor(COLOR("#FFFFFFFF"));
             this->mainGridTiles.push_back(tile);
