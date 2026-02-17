@@ -155,7 +155,7 @@ namespace inst::ui {
         this->mtpInstallMenuItem->SetIcon("romfs:/images/icons/usb-port.png");
         this->backupSaveDataMenuItem = pu::ui::elm::MenuItem::New("Backup Save Data");
         this->backupSaveDataMenuItem->SetColor(COLOR("#FFFFFFFF"));
-        this->backupSaveDataMenuItem->SetIcon("romfs:/images/icons/wrench.png");
+        this->backupSaveDataMenuItem->SetIcon("romfs:/images/icons/save-data-cloud.png");
         this->settingsMenuItem = pu::ui::elm::MenuItem::New("main.menu.set"_lang);
         this->settingsMenuItem->SetColor(COLOR("#FFFFFFFF"));
         this->settingsMenuItem->SetIcon("romfs:/images/icons/settings.png");
@@ -182,7 +182,7 @@ namespace inst::ui {
             "romfs:/images/icons/usb-port.png",
             "romfs:/images/icons/usb-port.png",
             "romfs:/images/icons/cloud-download.png",
-            "romfs:/images/icons/wrench.png",
+            "romfs:/images/icons/save-data-cloud.png",
             "romfs:/images/icons/settings.png",
             "romfs:/images/icons/exit-run.png"
         };
