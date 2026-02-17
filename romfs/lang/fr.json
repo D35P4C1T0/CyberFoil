@@ -224,6 +224,7 @@
             "shop_pass": "Mot de passe eShop: ",
             "shop_hide_installed": "Masquer les titres installés dans l’eShop",
             "shop_hide_installed_section": "Masquer la section Install\u00e9s dans l\u2019eShop",
+            "shop_all_base_only": "Afficher uniquement les titres de base dans la section Tous",
             "shop_start_grid_mode": "Démarrer la boutique en mode grille",
             "shop_reset_icons": "Réinitialiser le cache des icônes de la boutique",
             "language": "Langage: ",

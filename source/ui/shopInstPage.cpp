@@ -2577,6 +2577,16 @@ namespace inst::ui {
             this->visibleItems = items;
         }
 
+        if (this->isAllSection() && inst::config::shopAllBaseOnly) {
+            std::vector<shopInstStuff::ShopItem> baseOnlyItems;
+            baseOnlyItems.reserve(this->visibleItems.size());
+            for (const auto& item : this->visibleItems) {
+                if (IsBaseItem(item))
+                    baseOnlyItems.push_back(item);
+            }
+            this->visibleItems = std::move(baseOnlyItems);
+        }
+
         if (!this->shopSections.empty() && this->selectedSectionIndex >= 0 && this->selectedSectionIndex < static_cast<int>(this->shopSections.size()) && this->visibleItems.empty()) {
             const auto &section = this->shopSections[this->selectedSectionIndex];
             if (section.id == "updates" || section.id == "dlc") {

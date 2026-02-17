@@ -29,6 +29,7 @@ namespace inst::config {
     bool validateNCAs;
     bool shopHideInstalled;
     bool shopHideInstalledSection;
+    bool shopAllBaseOnly;
     bool shopStartGridMode;
     bool offlineDbAutoCheckOnStartup;
 
@@ -484,6 +485,7 @@ namespace inst::config {
             {"shopPass", shopPass},
             {"shopHideInstalled", shopHideInstalled},
             {"shopHideInstalledSection", shopHideInstalledSection},
+            {"shopAllBaseOnly", shopAllBaseOnly},
             {"shopStartGridMode", shopStartGridMode},
             {"offlineDbAutoCheckOnStartup", offlineDbAutoCheckOnStartup},
             {"shopRememberSelection", false},
@@ -513,6 +515,7 @@ namespace inst::config {
         shopPass.clear();
         shopHideInstalled = false;
         shopHideInstalledSection = false;
+        shopAllBaseOnly = false;
         shopStartGridMode = false;
         offlineDbAutoCheckOnStartup = true;
 
@@ -539,6 +542,7 @@ namespace inst::config {
             if (j.contains("shopPass")) shopPass = j["shopPass"].get<std::string>();
             if (j.contains("shopHideInstalled")) shopHideInstalled = j["shopHideInstalled"].get<bool>();
             if (j.contains("shopHideInstalledSection")) shopHideInstalledSection = j["shopHideInstalledSection"].get<bool>();
+            if (j.contains("shopAllBaseOnly")) shopAllBaseOnly = j["shopAllBaseOnly"].get<bool>();
             if (j.contains("shopStartGridMode")) shopStartGridMode = j["shopStartGridMode"].get<bool>();
             if (j.contains("offlineDbAutoCheckOnStartup")) offlineDbAutoCheckOnStartup = j["offlineDbAutoCheckOnStartup"].get<bool>();
         }

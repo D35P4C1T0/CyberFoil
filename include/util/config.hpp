@@ -30,6 +30,7 @@ namespace inst::config {
     extern bool usbAck;
     extern bool shopHideInstalled;
     extern bool shopHideInstalledSection;
+    extern bool shopAllBaseOnly;
     extern bool shopStartGridMode;
     extern bool offlineDbAutoCheckOnStartup;
 

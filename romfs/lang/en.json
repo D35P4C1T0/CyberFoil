@@ -224,6 +224,7 @@
             "shop_pass": "eShop password: ",
             "shop_hide_installed": "Hide installed titles in eShop",
             "shop_hide_installed_section": "Hide Installed section in eShop",
+            "shop_all_base_only": "Only show base titles in All section",
             "shop_start_grid_mode": "Start shop in grid mode",
             "shop_reset_icons": "Reset shop icon cache",
             "language": "Language: ",

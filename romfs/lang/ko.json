@@ -224,6 +224,7 @@
             "shop_pass": "eShop 비밀번호: ",
             "shop_hide_installed": "eShop에서 설치된 타이틀 숨기기",
             "shop_hide_installed_section": "eShop\uc758 \u2018\uc124\uce58\ub428\u2019 \uc139\uc158 \uc228\uae30\uae30",
+            "shop_all_base_only": "전체 섹션에서 기본 타이틀만 표시"전체\\" 섹션에서 기본 타이틀만 표시",
             "shop_start_grid_mode": "상점을 그리드 모드로 시작",
             "shop_reset_icons": "상점 아이콘 캐시 재설정",
             "language": "언어: ",

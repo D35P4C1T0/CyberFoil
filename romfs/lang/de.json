@@ -224,6 +224,7 @@
             "shop_pass": "eShop Passwort: ",
             "shop_hide_installed": "Installierte Titel im eShop ausblenden",
             "shop_hide_installed_section": "Installiert-Abschnitt im eShop ausblenden",
+            "shop_all_base_only": "Nur Basistitel im Abschnitt „Alle“ anzeigen",
             "shop_start_grid_mode": "Shop im Rastermodus starten",
             "shop_reset_icons": "Shop-Icon-Cache zurücksetzen",
             "language": "Sprache: ",

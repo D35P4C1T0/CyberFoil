@@ -224,6 +224,7 @@
             "shop_pass": "Password eShop: ",
             "shop_hide_installed": "Nascondi i titoli installati nell'eShop",
             "shop_hide_installed_section": "Nascondi la sezione Installati nell\u2019eShop",
+            "shop_all_base_only": "Mostra solo i titoli base nella sezione Tutti",
             "shop_start_grid_mode": "Avvia il negozio in modalità griglia",
             "shop_reset_icons": "Reimpostare la cache delle icone del negozio",
             "language": "Lingua: ",
