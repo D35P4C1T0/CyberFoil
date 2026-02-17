@@ -13,7 +13,7 @@ jobs:
       HAUTH_SEED: ${{ secrets.HAUTH_SEED }}
 
     container:
-      image: devkitpro/devkita64:20251231
+      image: devkitpro/devkita64:latest
 
     steps:
       - name: Checkout (with submodules)
