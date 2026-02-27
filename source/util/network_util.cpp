@@ -213,7 +213,7 @@ namespace tin::network
         this->StreamDataRange(offset, size, streamFunc);
     }
 
-    int HTTPDownload::StreamDataRange(size_t offset, size_t size, std::function<size_t (u8* bytes, size_t size)> streamFunc)
+    int HTTPDownload::StreamDataRange(size_t offset, size_t size, std::function<size_t (u8* bytes, size_t size)> streamFunc, std::function<bool()> retryConfirmFunc)
     {
         if (!m_rangesSupported)
         {
@@ -234,77 +234,89 @@ namespace tin::network
             return written;
         };
 
-        for (int attempt = 0; attempt <= kMaxRetries; attempt++)
+        while (true)
         {
-            if (attempt > 0)
+            for (int attempt = 0; attempt <= kMaxRetries; attempt++)
             {
-                LOG_DEBUG("StreamDataRange: retry %d/%d, resuming at offset %zu+%zu\n",
-                    attempt, kMaxRetries, offset, bytesReceived);
-                svcSleepThread(kRetryDelayNs);
+                if (attempt > 0)
+                {
+                    LOG_DEBUG("StreamDataRange: retry %d/%d, resuming at offset %zu+%zu\n",
+                        attempt, kMaxRetries, offset, bytesReceived);
+                    svcSleepThread(kRetryDelayNs);
+                }
+
+                const size_t currentOffset = offset + bytesReceived;
+                const size_t remaining     = size - bytesReceived;
+
+                if (remaining == 0)
+                    return 0;
+
+                CURL* curl = curl_easy_init();
+                if (!curl)
+                    THROW_FORMAT("Failed to initialize curl\n");
+
+                std::stringstream ss;
+                ss << currentOffset << "-" << (currentOffset + remaining - 1);
+                auto range = ss.str();
+
+                auto writeDataFunc = std::function<size_t(u8*, size_t)>(trackingFunc);
+
+                curl_easy_setopt(curl, CURLOPT_URL, m_url.c_str());
+                curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
+                curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
+                curl_easy_setopt(curl, CURLOPT_RANGE, range.c_str());
+                curl_easy_setopt(curl, CURLOPT_WRITEDATA, &writeDataFunc);
+                curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &tin::network::HTTPDownload::ParseHTMLData);
+                curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
+                curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 128L);
+                curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
+                std::string authValue;
+                ApplyBasicAuth(curl, authValue);
+
+                LOG_DEBUG("GET %s range=%s (attempt %d/%d)\n",
+                    m_url.c_str(), range.c_str(), attempt + 1, kMaxRetries + 1);
+                CURLcode rc = curl_easy_perform(curl);
+
+                u64 httpCode = 0;
+                curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
+                LOG_DEBUG("GET %s done: http=%llu rc=%s bytesReceived=%zu/%zu\n",
+                    m_url.c_str(), (unsigned long long)httpCode,
+                    curl_easy_strerror(rc), bytesReceived, size);
+                curl_easy_cleanup(curl);
+
+                if (httpCode == 206 && rc == CURLE_OK)
+                    return 0;
+
+                const bool fatal =
+                    rc == CURLE_WRITE_ERROR ||
+                    httpCode == 401 ||
+                    httpCode == 403 ||
+                    httpCode == 404 ||
+                    httpCode == 416;
+
+                if (fatal)
+                {
+                    LOG_DEBUG("StreamDataRange: fatal error, aborting (http=%llu rc=%s)\n",
+                        (unsigned long long)httpCode, curl_easy_strerror(rc));
+                    return 1;
+                }
+
+                LOG_DEBUG("StreamDataRange: retriable error (http=%llu rc=%s), %d retries left\n",
+                    (unsigned long long)httpCode, curl_easy_strerror(rc),
+                    kMaxRetries - attempt);
             }
 
-            const size_t currentOffset = offset + bytesReceived;
-            const size_t remaining     = size - bytesReceived;
-
-            if (remaining == 0)
-                return 0;
-
-            CURL* curl = curl_easy_init();
-            if (!curl)
-                THROW_FORMAT("Failed to initialize curl\n");
-
-            std::stringstream ss;
-            ss << currentOffset << "-" << (currentOffset + remaining - 1);
-            auto range = ss.str();
-
-            auto writeDataFunc = std::function<size_t(u8*, size_t)>(trackingFunc);
-
-            curl_easy_setopt(curl, CURLOPT_URL, m_url.c_str());
-            curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
-            curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
-            curl_easy_setopt(curl, CURLOPT_RANGE, range.c_str());
-            curl_easy_setopt(curl, CURLOPT_WRITEDATA, &writeDataFunc);
-            curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &tin::network::HTTPDownload::ParseHTMLData);
-            std::string authValue;
-            ApplyBasicAuth(curl, authValue);
-
-            LOG_DEBUG("GET %s range=%s (attempt %d/%d)\n",
-                m_url.c_str(), range.c_str(), attempt + 1, kMaxRetries + 1);
-            CURLcode rc = curl_easy_perform(curl);
-
-            u64 httpCode = 0;
-            curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
-            LOG_DEBUG("GET %s done: http=%llu rc=%s bytesReceived=%zu/%zu\n",
-                m_url.c_str(), (unsigned long long)httpCode,
-                curl_easy_strerror(rc), bytesReceived, size);
-            curl_easy_cleanup(curl);
-
-            if (httpCode == 206 && rc == CURLE_OK)
-                return 0;
-
-            // Distinguish retriable network errors from fatal ones.
-            // Fatal errors: wrong credentials, resource not found, callback refused data.
-            // No point retrying those.
-            const bool fatal =
-                rc == CURLE_WRITE_ERROR ||     // streamFunc refused data
-                httpCode == 401 ||
-                httpCode == 403 ||
-                httpCode == 404 ||
-                httpCode == 416;               // range not satisfiable
-
-            if (fatal)
+            // Auto-retries exhausted — ask the caller whether to keep trying.
+            LOG_DEBUG("StreamDataRange: auto-retries exhausted for %s\n", m_url.c_str());
+            if (retryConfirmFunc && retryConfirmFunc())
             {
-                LOG_DEBUG("StreamDataRange: fatal error, aborting (http=%llu rc=%s)\n",
-                    (unsigned long long)httpCode, curl_easy_strerror(rc));
-                return 1;
+                LOG_DEBUG("StreamDataRange: user confirmed retry, resuming at %zu+%zu\n",
+                    offset, bytesReceived);
+                continue;
             }
-
-            LOG_DEBUG("StreamDataRange: retriable error (http=%llu rc=%s), %d retries left\n",
-                (unsigned long long)httpCode, curl_easy_strerror(rc),
-                kMaxRetries - attempt);
+            break;
         }
 
-        LOG_DEBUG("StreamDataRange: all retries exhausted for %s\n", m_url.c_str());
         return 1;
     }
 

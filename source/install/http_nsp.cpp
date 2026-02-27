@@ -22,6 +22,7 @@ SOFTWARE.
 
 #include "install/http_nsp.hpp"
 
+#include <atomic>
 #include <cstdio>
 #include <switch.h>
 #include <threads.h>
@@ -32,6 +33,9 @@ SOFTWARE.
 #include "util/util.hpp"
 #include "util/lang.hpp"
 #include "ui/instPage.hpp"
+#include "ui/MainApplication.hpp"
+
+namespace inst::ui { extern MainApplication *mainApp; }
 
 namespace tin::install::nsp
 {
@@ -71,12 +75,19 @@ namespace tin::install::nsp
 
     }
 
+    struct RetryConfirmState
+    {
+        std::atomic<bool> pending{false};
+        std::atomic<bool> approved{false};
+    };
+
     struct StreamFuncArgs
     {
         tin::network::HTTPDownload* download;
         tin::data::BufferedPlaceholderWriter* bufferedPlaceholderWriter;
         u64 pfs0Offset;
         u64 ncaSize;
+        RetryConfirmState retryConfirm;
     };
 
     int CurlStreamFunc(void* in)
@@ -95,7 +106,14 @@ namespace tin::install::nsp
             return streamBufSize;
         };
 
-        if (args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc) == 1) stopThreadsHttpNsp = true;
+        auto retryConfirmFunc = [&]() -> bool {
+            args->retryConfirm.pending.store(true);
+            while (args->retryConfirm.pending.load())
+                svcSleepThread(50000000ULL); // poll toutes les 50ms
+            return args->retryConfirm.approved.load();
+        };
+
+        if (args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc, retryConfirmFunc) == 1) stopThreadsHttpNsp = true;
         return 0;
     }
 
@@ -142,6 +160,17 @@ namespace tin::install::nsp
         inst::ui::instPage::setInstBarPerc(0);
         while (!bufferedPlaceholderWriter.IsBufferDataComplete() && !stopThreadsHttpNsp)
         {
+            if (args.retryConfirm.pending.load())
+            {
+                int choice = inst::ui::mainApp->CreateShowDialog(
+                    "inst.net.retry.title"_lang,
+                    "inst.net.retry.desc"_lang,
+                    {"inst.net.retry.yes"_lang, "inst.net.retry.no"_lang},
+                    true);
+                args.retryConfirm.approved.store(choice == 0);
+                args.retryConfirm.pending.store(false);
+            }
+
             u64 newTime = armGetSystemTick();
 
             if (newTime - startTime >= freq * 0.5)
