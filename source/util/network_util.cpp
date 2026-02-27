@@ -225,9 +225,6 @@ namespace tin::network
 
         size_t bytesReceived = 0;
 
-        // Wrap streamFunc to track how many bytes have been successfully handed off.
-        // bytesReceived accumulates across retries so each retry resumes from the
-        // correct offset without re-delivering already-buffered data.
         auto trackingFunc = [&](u8* buf, size_t sz) -> size_t {
             size_t written = streamFunc(buf, sz);
             bytesReceived += written;
@@ -270,6 +267,7 @@ namespace tin::network
                 curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
                 curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 128L);
                 curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
+
                 std::string authValue;
                 ApplyBasicAuth(curl, authValue);
 
@@ -306,11 +304,10 @@ namespace tin::network
                     kMaxRetries - attempt);
             }
 
-            // Auto-retries exhausted — ask the caller whether to keep trying.
             LOG_DEBUG("StreamDataRange: auto-retries exhausted for %s\n", m_url.c_str());
             if (retryConfirmFunc && retryConfirmFunc())
             {
-                LOG_DEBUG("StreamDataRange: user confirmed retry, resuming at %zu+%zu\n",
+                LOG_DEBUG("StreamDataRange: retry, resuming at %zu+%zu\n",
                     offset, bytesReceived);
                 continue;
             }

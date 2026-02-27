@@ -109,7 +109,7 @@ namespace tin::install::nsp
         auto retryConfirmFunc = [&]() -> bool {
             args->retryConfirm.pending.store(true);
             while (args->retryConfirm.pending.load())
-                svcSleepThread(50000000ULL); // poll toutes les 50ms
+                svcSleepThread(50 * 1000 * 1000ULL); 
             return args->retryConfirm.approved.load();
         };
 
@@ -196,8 +196,10 @@ namespace tin::install::nsp
                 std::string etaText = "--:--";
                 if (emaSpeed > 0.0 && totalSize > sizeBuffered) {
                     const double remainingMb = (totalSize - sizeBuffered) / 1000000.0;
-                    const auto etaSeconds = static_cast<std::uint64_t>(remainingMb / emaSpeed);
-                    etaText = FormatEta(etaSeconds);
+                    const double etaSecondsF = remainingMb / emaSpeed;
+                    if (etaSecondsF < 86400.0) {
+                        etaText = FormatEta(static_cast<std::uint64_t>(etaSecondsF));
+                    }
                 }
 
                 inst::ui::instPage::setInstInfoText("inst.info_page.downloading"_lang + inst::util::formatUrlString(ncaFileName) + "inst.info_page.at"_lang + FormatOneDecimal(emaSpeed) + " MB/s");
