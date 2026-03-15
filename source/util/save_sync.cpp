@@ -591,7 +591,7 @@ namespace {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-        const std::string& userAgent = inst::curl::getDefaultUserAgent();
+        const std::string& userAgent = inst::curl::getUserAgent();
         curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outBody);
@@ -659,7 +659,7 @@ namespace {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-        const std::string& userAgent = inst::curl::getDefaultUserAgent();
+        const std::string& userAgent = inst::curl::getUserAgent();
         curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &outBody);
@@ -797,7 +797,7 @@ namespace {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
-        const std::string& userAgent = inst::curl::getDefaultUserAgent();
+        const std::string& userAgent = inst::curl::getUserAgent();
         curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);

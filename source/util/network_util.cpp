@@ -30,6 +30,7 @@ SOFTWARE.
 #include <cstring>
 #include <sstream>
 #include <limits>
+#include "util/curl.hpp"
 #include "util/error.hpp"
 #include "util/hauth.hpp"
 #include "util/uid.hpp"
@@ -214,7 +215,8 @@ namespace tin::network
 
         curl_easy_setopt(curl, CURLOPT_URL, requestUrl.c_str());
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
+        const std::string& userAgent = inst::curl::getUserAgent();
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "identity");
         curl_easy_setopt(curl, CURLOPT_RANGE, range.c_str());
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
@@ -315,7 +317,8 @@ namespace tin::network
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
+        const std::string& userAgent = inst::curl::getUserAgent();
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_HEADERDATA, this);
         curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, &tin::network::HTTPHeader::ParseHTMLHeader);
         std::string authValue;
@@ -645,7 +648,8 @@ namespace tin::network
 
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DROP");
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
+        const std::string& userAgent = inst::curl::getUserAgent();
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 50);
 

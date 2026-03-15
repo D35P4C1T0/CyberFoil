@@ -52,7 +52,7 @@ static bool hasVisibleChars(const std::string& value) {
 
 namespace inst::curl {
     const std::string& getDefaultUserAgent() {
-        static const std::string kDefaultUserAgent = "CyberFoil/" + inst::config::appVersion;
+        static const std::string kDefaultUserAgent = "cyberfoil";
         return kDefaultUserAgent;
     }
 
