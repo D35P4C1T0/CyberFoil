@@ -159,6 +159,10 @@ struct DownloadProgressContext {
     curl_off_t lastTotal = -1;
 };
 
+struct WriteAtOffsetContext {
+    FILE* file = nullptr;
+};
+
 int progress_callback_file(void *clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t /*ultotal*/, curl_off_t /*ulnow*/) {
     auto* ctx = static_cast<DownloadProgressContext*>(clientp);
     if (ctx == nullptr || ctx->cb == nullptr || !(*ctx->cb)) {
@@ -177,9 +181,18 @@ int progress_callback_file(void *clientp, curl_off_t dltotal, curl_off_t dlnow, 
     return 0;
 }
 
+static size_t writeDataFileAtOffset(void *ptr, size_t size, size_t nmemb, void *stream) {
+    auto* ctx = static_cast<WriteAtOffsetContext*>(stream);
+    if (ctx == nullptr || ctx->file == nullptr)
+        return 0;
+    return fwrite(ptr, size, nmemb, ctx->file);
+}
+
 static constexpr long kDefaultConnectTimeoutMs = 15000;
 static constexpr long kLowSpeedLimitBytesPerSec = 1;
 static constexpr long kLowSpeedTimeSeconds = 45;
+static constexpr long kFileDownloadCurlBufferSize = 512L * 1024L;
+static constexpr std::size_t kFileDownloadIoBufferSize = 1024U * 1024U;
 
 static bool ensureCurlGlobalInit() {
     static std::once_flag initFlag;
@@ -206,6 +219,8 @@ static void applyCommonCurlOptions(CURL *curl_handle, const std::string& url, lo
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl_handle, CURLOPT_BUFFERSIZE, kFileDownloadCurlBufferSize);
+    curl_easy_setopt(curl_handle, CURLOPT_TCP_KEEPALIVE, 1L);
 
     if (writeProgress) {
         curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 0L);
@@ -222,6 +237,11 @@ static void applyCommonCurlOptions(CURL *curl_handle, const std::string& url, lo
         curl_easy_setopt(curl_handle, CURLOPT_LOW_SPEED_LIMIT, kLowSpeedLimitBytesPerSec);
         curl_easy_setopt(curl_handle, CURLOPT_LOW_SPEED_TIME, kLowSpeedTimeSeconds);
     }
+}
+
+static void applyBufferedFileIo(FILE* file) {
+    if (file != nullptr)
+        setvbuf(file, nullptr, _IOFBF, kFileDownloadIoBufferSize);
 }
 
 namespace inst::curl {
@@ -247,6 +267,7 @@ namespace inst::curl {
             curl_easy_cleanup(curl_handle);
             return false;
         }
+        applyBufferedFileIo(pagefile);
 
         curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, pagefile);
         const CURLcode result = curl_easy_perform(curl_handle);
@@ -296,6 +317,7 @@ namespace inst::curl {
             curl_easy_cleanup(curl_handle);
             return false;
         }
+        applyBufferedFileIo(pagefile);
 
         curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, pagefile);
         const CURLcode result = curl_easy_perform(curl_handle);
@@ -317,6 +339,147 @@ namespace inst::curl {
         removeFileIfExistsNoThrow(pagefilename);
 
         LOG_DEBUG("downloadFileWithProgress failed rc=%s http=%ld url=%s\n", curl_easy_strerror(result), responseCode, ourUrl.c_str());
+        return false;
+    }
+
+    bool downloadFileRangeWithProgress(const std::string ourUrl, const char *pagefilename, std::uint64_t start, std::uint64_t endInclusive, long timeout, const DownloadProgressCallback& progressCb) {
+        if (!ensureCurlGlobalInit()) {
+            LOG_DEBUG("curl global init failed\n");
+            return false;
+        }
+
+        if (endInclusive < start) {
+            LOG_DEBUG("downloadFileRangeWithProgress invalid range start=%llu end=%llu\n",
+                static_cast<unsigned long long>(start), static_cast<unsigned long long>(endInclusive));
+            return false;
+        }
+
+        CURL *curl_handle = curl_easy_init();
+        if (curl_handle == nullptr) {
+            LOG_DEBUG("curl_easy_init failed\n");
+            return false;
+        }
+
+        applyCommonCurlOptions(curl_handle, ourUrl, timeout, false);
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writeDataFile);
+        curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
+        curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 0L);
+
+        DownloadProgressContext progressCtx{};
+        progressCtx.cb = &progressCb;
+        progressCtx.lastNow = -1;
+        progressCtx.lastTotal = -1;
+        curl_easy_setopt(curl_handle, CURLOPT_XFERINFOFUNCTION, progress_callback_file);
+        curl_easy_setopt(curl_handle, CURLOPT_XFERINFODATA, &progressCtx);
+
+        const std::string range = std::to_string(start) + "-" + std::to_string(endInclusive);
+        curl_easy_setopt(curl_handle, CURLOPT_RANGE, range.c_str());
+
+        FILE *pagefile = fopen(pagefilename, "wb");
+        if (pagefile == nullptr) {
+            LOG_DEBUG("Failed to open ranged download output file: %s\n", pagefilename);
+            curl_easy_cleanup(curl_handle);
+            return false;
+        }
+        applyBufferedFileIo(pagefile);
+
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, pagefile);
+        const CURLcode result = curl_easy_perform(curl_handle);
+        long responseCode = 0;
+        curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &responseCode);
+
+        fclose(pagefile);
+        curl_easy_cleanup(curl_handle);
+
+        const bool ok = (result == CURLE_OK) && (responseCode == 206);
+        if (ok) {
+            if (progressCb) {
+                progressCb(progressCtx.lastNow > 0 ? static_cast<std::uint64_t>(progressCtx.lastNow) : 0,
+                    progressCtx.lastTotal > 0 ? static_cast<std::uint64_t>(progressCtx.lastTotal) : 0);
+            }
+            return true;
+        }
+
+        removeFileIfExistsNoThrow(pagefilename);
+
+        LOG_DEBUG("downloadFileRangeWithProgress failed rc=%s http=%ld url=%s range=%s\n",
+            curl_easy_strerror(result), responseCode, ourUrl.c_str(), range.c_str());
+        return false;
+    }
+
+    bool downloadFileRangeToOffsetWithProgress(const std::string ourUrl, const char *pagefilename, std::uint64_t fileOffset, std::uint64_t start, std::uint64_t endInclusive, long timeout, const DownloadProgressCallback& progressCb) {
+        if (!ensureCurlGlobalInit()) {
+            LOG_DEBUG("curl global init failed\n");
+            return false;
+        }
+
+        if (endInclusive < start) {
+            LOG_DEBUG("downloadFileRangeToOffsetWithProgress invalid range start=%llu end=%llu\n",
+                static_cast<unsigned long long>(start), static_cast<unsigned long long>(endInclusive));
+            return false;
+        }
+
+        CURL *curl_handle = curl_easy_init();
+        if (curl_handle == nullptr) {
+            LOG_DEBUG("curl_easy_init failed\n");
+            return false;
+        }
+
+        applyCommonCurlOptions(curl_handle, ourUrl, timeout, false);
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEFUNCTION, writeDataFileAtOffset);
+        curl_easy_setopt(curl_handle, CURLOPT_FAILONERROR, 1L);
+        curl_easy_setopt(curl_handle, CURLOPT_NOPROGRESS, 0L);
+
+        DownloadProgressContext progressCtx{};
+        progressCtx.cb = &progressCb;
+        progressCtx.lastNow = -1;
+        progressCtx.lastTotal = -1;
+        curl_easy_setopt(curl_handle, CURLOPT_XFERINFOFUNCTION, progress_callback_file);
+        curl_easy_setopt(curl_handle, CURLOPT_XFERINFODATA, &progressCtx);
+
+        const std::string range = std::to_string(start) + "-" + std::to_string(endInclusive);
+        curl_easy_setopt(curl_handle, CURLOPT_RANGE, range.c_str());
+
+        FILE *pagefile = fopen(pagefilename, "r+b");
+        if (pagefile == nullptr) {
+            LOG_DEBUG("Failed to open ranged offset output file: %s\n", pagefilename);
+            curl_easy_cleanup(curl_handle);
+            return false;
+        }
+        applyBufferedFileIo(pagefile);
+
+#if defined(_WIN32)
+        if (_fseeki64(pagefile, static_cast<__int64>(fileOffset), SEEK_SET) != 0) {
+#else
+        if (fseeko(pagefile, static_cast<off_t>(fileOffset), SEEK_SET) != 0) {
+#endif
+            fclose(pagefile);
+            curl_easy_cleanup(curl_handle);
+            return false;
+        }
+
+        WriteAtOffsetContext writeCtx{};
+        writeCtx.file = pagefile;
+        curl_easy_setopt(curl_handle, CURLOPT_WRITEDATA, &writeCtx);
+        const CURLcode result = curl_easy_perform(curl_handle);
+        long responseCode = 0;
+        curl_easy_getinfo(curl_handle, CURLINFO_RESPONSE_CODE, &responseCode);
+
+        fflush(pagefile);
+        fclose(pagefile);
+        curl_easy_cleanup(curl_handle);
+
+        const bool ok = (result == CURLE_OK) && (responseCode == 206);
+        if (ok) {
+            if (progressCb) {
+                progressCb(progressCtx.lastNow > 0 ? static_cast<std::uint64_t>(progressCtx.lastNow) : 0,
+                    progressCtx.lastTotal > 0 ? static_cast<std::uint64_t>(progressCtx.lastTotal) : 0);
+            }
+            return true;
+        }
+
+        LOG_DEBUG("downloadFileRangeToOffsetWithProgress failed rc=%s http=%ld url=%s range=%s\n",
+            curl_easy_strerror(result), responseCode, ourUrl.c_str(), range.c_str());
         return false;
     }
 
@@ -407,6 +570,7 @@ namespace inst::curl {
             curl_easy_cleanup(curl_handle);
             return false;
         }
+        applyBufferedFileIo(pagefile);
 
         long responseCode = 0;
         char* contentType = nullptr;
