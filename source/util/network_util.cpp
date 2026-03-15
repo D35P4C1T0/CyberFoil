@@ -261,14 +261,11 @@ namespace tin::network
         LOG_DEBUG("Range request failed url=%s range=%s http=%lu curl=%d\n",
             requestUrl.c_str(), range.c_str(), httpCode, (int)rc);
 
-        // Prefer surfacing the HTTP status when available (eg 200 means range ignored).
         if (httpCode != 0 && httpCode != 206)
             return static_cast<int>(httpCode);
 
         return 1000 + static_cast<int>(rc);
     }
-
-    // HTTPHeader
 
     HTTPHeader::HTTPHeader(std::string url) :
         m_url(url)
@@ -281,11 +278,9 @@ namespace tin::network
         size_t numBytes = size * numItems;
         std::string line(bytes, numBytes);
 
-        // Remove any newlines or carriage returns
         line.erase(std::remove(line.begin(), line.end(), '\n'), line.end());
         line.erase(std::remove(line.begin(), line.end(), '\r'), line.end());
 
-        // Split into key and value
         if (!line.empty())
         {
             auto keyEnd = line.find(": ");
@@ -295,7 +290,6 @@ namespace tin::network
                 std::string key = line.substr(0, keyEnd);
                 std::string value = line.substr(keyEnd + 2);
 
-                // Make key lowercase
                 std::transform(key.begin(), key.end(), key.begin(), ::tolower);
                 header->m_values[key] = value;
             }
@@ -306,7 +300,6 @@ namespace tin::network
 
     void HTTPHeader::PerformRequest()
     {
-        // We don't want any existing values to get mixed up with this request
         m_values.clear();
 
         CURL* curl = curl_easy_init();
@@ -353,9 +346,6 @@ namespace tin::network
     {
         return m_values[key];
     }
-
-    // End HTTPHeader
-    // HTTPDownload
 
     HTTPDownload::HTTPDownload(std::string url) :
         m_url(url), m_header(url)
@@ -417,8 +407,6 @@ namespace tin::network
 
             m_jbodSize = runningOffset;
             if (!m_jbodSegments.empty()) {
-                // Real-world JBOD feeds can misreport/omit the final part size.
-                // Keep the tail segment open-ended so sequential install reads never hard-fail near completion.
                 m_jbodSegments.back().openEnded = true;
                 m_jbodSize = std::numeric_limits<size_t>::max();
             }
@@ -426,8 +414,6 @@ namespace tin::network
             return;
         }
 
-        // Some shops/CDNs reject probe-style requests but still serve ranged reads.
-        // Defer capability validation to the actual range request path.
         m_rangesSupported = true;
     }
 
@@ -480,7 +466,7 @@ namespace tin::network
             THROW_FORMAT("Attempted range request when ranges aren't supported!\n");
 
         static constexpr int kMaxRetries = 3;
-        static constexpr u64 kRetryDelayNs = 2000000000ULL; // 2 seconds
+        static constexpr u64 kRetryDelayNs = 2000000000ULL;
 
         auto streamWithRetry = [&](const std::string& url, size_t requestOffset, size_t requestSize) -> int
         {
@@ -592,8 +578,6 @@ namespace tin::network
         return 0;
     }
 
-    // End HTTPDownload
-
     void SetBasicAuth(const std::string& user, const std::string& pass)
     {
         g_basic_auth_user = user;
@@ -613,7 +597,7 @@ namespace tin::network
         int ret = 0;
         size_t read = 0;
 
-        while ((((ret = recv(sockfd, (u8*)buf + read, len - read, 0)) > 0 && (read += ret) < len) || errno == EAGAIN)) 
+        while ((((ret = recv(sockfd, (u8*)buf + read, len - read, 0)) > 0 && (read += ret) < len) || errno == EAGAIN))
         {
             errno = 0;
         }
@@ -627,26 +611,26 @@ namespace tin::network
         size_t written = 0;
 
         while (written < len)
-        {            
+        {
             inst::ui::mainApp->UpdateButtons();
             u64 kDown = inst::ui::mainApp->GetButtonsDown();
-            if (kDown & HidNpadButton_B)  // Break if user clicks 'B'
+            if (kDown & HidNpadButton_B)
                 break;
 
             errno = 0;
             ret = send(sockfd, (u8*)buf + written, len - written, 0);
-            
-            if (ret < 0){ // If error
-                if (errno == EWOULDBLOCK || errno == EAGAIN){ // Is it because other side is busy?
+
+            if (ret < 0) {
+                if (errno == EWOULDBLOCK || errno == EAGAIN) {
                     sleep(5);
                     continue;
                 }
-                break; // No? Die.
+                break;
             }
-            
+
             written += ret;
         }
-    
+
         return written;
     }
 
@@ -663,9 +647,9 @@ namespace tin::network
         curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DROP");
         curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, false);
-        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 50); 
+        curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 50);
 
-        curl_easy_perform(curl); // ignore returning value
+        curl_easy_perform(curl);
 
         curl_easy_cleanup(curl);
     }

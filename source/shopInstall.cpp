@@ -968,7 +968,8 @@ namespace shopInstStuff {
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
-        curl_easy_setopt(curl, CURLOPT_USERAGENT, "cyberfoil");
+        const std::string& userAgent = inst::curl::getDefaultUserAgent();
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result.body);
         curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 15000L);

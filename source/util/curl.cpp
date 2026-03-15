@@ -2,6 +2,7 @@
 #include <string>
 #include <sstream>
 #include <iostream>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -41,8 +42,43 @@ static bool isLikelyImageFile(const char *path) {
     return false;
 }
 
-static std::string getUserAgent() {
-    return "CyberFoil/" + inst::config::appVersion;
+static bool hasVisibleChars(const std::string& value) {
+    for (unsigned char c : value) {
+        if (!std::isspace(c))
+            return true;
+    }
+    return false;
+}
+
+namespace inst::curl {
+    const std::string& getDefaultUserAgent() {
+        static const std::string kDefaultUserAgent = "CyberFoil/" + inst::config::appVersion;
+        return kDefaultUserAgent;
+    }
+
+    const std::string& getDownloadUserAgent() {
+        static const std::string kChromeUserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+        static const std::string kSafariUserAgent =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1";
+        static const std::string kFirefoxUserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0";
+
+        const std::string mode = inst::config::NormalizeHttpUserAgentMode(inst::config::httpUserAgentMode);
+        if (mode == "chrome")
+            return kChromeUserAgent;
+        if (mode == "safari")
+            return kSafariUserAgent;
+        if (mode == "firefox")
+            return kFirefoxUserAgent;
+        if (mode == "custom" && hasVisibleChars(inst::config::httpUserAgent))
+            return inst::config::httpUserAgent;
+        return getDefaultUserAgent();
+    }
+
+    const std::string& getUserAgent() {
+        return getDownloadUserAgent();
+    }
 }
 
 static void buildVersionAndRevision(std::string& outVersion, std::string& outRevision)
@@ -166,7 +202,7 @@ static void applyCommonCurlOptions(CURL *curl_handle, const std::string& url, lo
     curl_easy_setopt(curl_handle, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl_handle, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYPEER, 0L);
-    std::string userAgent = getUserAgent();
+    const std::string& userAgent = inst::curl::getDownloadUserAgent();
     curl_easy_setopt(curl_handle, CURLOPT_USERAGENT, userAgent.c_str());
     curl_easy_setopt(curl_handle, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1L);
