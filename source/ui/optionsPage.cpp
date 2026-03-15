@@ -110,6 +110,101 @@ namespace inst::ui {
                 return "custom";
             return "default";
         }
+
+        std::vector<std::string> WrapDialogText(const std::string& text, std::size_t maxLineChars)
+        {
+            std::vector<std::string> lines;
+            if (text.empty()) {
+                lines.push_back("No changelog available for this release.");
+                return lines;
+            }
+
+            std::stringstream paragraphs(text);
+            std::string paragraph;
+            while (std::getline(paragraphs, paragraph)) {
+                if (paragraph.empty()) {
+                    lines.push_back("");
+                    continue;
+                }
+
+                std::stringstream words(paragraph);
+                std::string word;
+                std::string line;
+                while (words >> word) {
+                    const std::string candidate = line.empty() ? word : (line + " " + word);
+                    if (candidate.size() <= maxLineChars) {
+                        line = candidate;
+                        continue;
+                    }
+
+                    if (!line.empty()) {
+                        lines.push_back(line);
+                        line.clear();
+                    }
+
+                    if (word.size() <= maxLineChars) {
+                        line = word;
+                        continue;
+                    }
+
+                    std::size_t start = 0;
+                    while (start < word.size()) {
+                        lines.push_back(word.substr(start, maxLineChars));
+                        start += maxLineChars;
+                    }
+                }
+
+                if (!line.empty())
+                    lines.push_back(line);
+            }
+
+            if (lines.empty())
+                lines.push_back("No changelog available for this release.");
+            return lines;
+        }
+
+        void ShowPagedTextDialog(const std::string& title, const std::string& text)
+        {
+            auto lines = WrapDialogText(text, 68);
+            static constexpr int kLinesPerPage = 18;
+            const int totalPages = std::max(1, static_cast<int>((lines.size() + kLinesPerPage - 1) / kLinesPerPage));
+            int page = 0;
+
+            while (true) {
+                const int start = page * kLinesPerPage;
+                const int end = std::min<int>(static_cast<int>(lines.size()), start + kLinesPerPage);
+                std::string body;
+                for (int i = start; i < end; i++) {
+                    if (!body.empty())
+                        body.push_back('\n');
+                    body += lines[static_cast<std::size_t>(i)];
+                }
+                body += "\n\nPage " + std::to_string(page + 1) + "/" + std::to_string(totalPages);
+
+                std::vector<std::string> options;
+                std::vector<int> actions;
+                if (page > 0) {
+                    options.push_back("Previous");
+                    actions.push_back(-1);
+                }
+                if (page + 1 < totalPages) {
+                    options.push_back("Next");
+                    actions.push_back(1);
+                }
+                options.push_back("Close");
+                actions.push_back(0);
+
+                const int choice = mainApp->CreateShowDialog(title, body, options, false);
+                if (choice < 0 || choice >= static_cast<int>(actions.size()) || actions[choice] == 0)
+                    break;
+
+                page += actions[choice];
+                if (page < 0)
+                    page = 0;
+                if (page >= totalPages)
+                    page = totalPages - 1;
+            }
+        }
     }
 
     optionsPage::optionsPage() : Layout::Layout() {
@@ -213,16 +308,34 @@ namespace inst::ui {
     }
 
     void optionsPage::askToUpdate(std::vector<std::string> updateInfo) {
-            if (!mainApp->CreateShowDialog("options.update.title"_lang, "options.update.desc0"_lang + updateInfo[0] + "options.update.desc1"_lang, {"options.update.opt0"_lang, "common.cancel"_lang}, false)) {
+            const std::string version = updateInfo.empty() ? std::string() : updateInfo[0];
+            const std::string downloadUrl = updateInfo.size() > 1 ? updateInfo[1] : std::string();
+            const std::string releaseNotes = updateInfo.size() > 2 ? updateInfo[2] : "No changelog available for this release.";
+
+            while (true) {
+                int choice = mainApp->CreateShowDialog(
+                    "options.update.title"_lang,
+                    "options.update.desc0"_lang + version + "options.update.desc1"_lang,
+                    {"options.update.opt0"_lang, "View Changelog", "common.cancel"_lang},
+                    false);
+
+                if (choice == 1) {
+                    ShowPagedTextDialog("Changelog " + version, releaseNotes);
+                    continue;
+                }
+
+                if (choice != 0)
+                    break;
+
                 inst::ui::instPage::loadInstallScreen();
-                inst::ui::instPage::setTopInstInfoText("options.update.top_info"_lang + updateInfo[0]);
+                inst::ui::instPage::setTopInstInfoText("options.update.top_info"_lang + version);
                 inst::ui::instPage::setInstBarPerc(0);
-                inst::ui::instPage::setInstInfoText("options.update.bot_info"_lang + updateInfo[0]);
+                inst::ui::instPage::setInstInfoText("options.update.bot_info"_lang + version);
                 try {
                     std::string downloadName = inst::config::appDir + "/temp_download.zip";
-                    inst::curl::downloadFile(updateInfo[1], downloadName.c_str(), 0, true);
+                    inst::curl::downloadFile(downloadUrl, downloadName.c_str(), 0, true);
                     romfsExit();
-                    inst::ui::instPage::setInstInfoText("options.update.bot_info2"_lang + updateInfo[0]);
+                    inst::ui::instPage::setInstInfoText("options.update.bot_info2"_lang + version);
                     inst::zip::extractFile(downloadName, "sdmc:/");
                     std::filesystem::remove(downloadName);
                     mainApp->CreateShowDialog("options.update.complete"_lang, "options.update.end_desc"_lang, {"common.ok"_lang}, false);
@@ -231,6 +344,7 @@ namespace inst::ui {
                 }
                 mainApp->FadeOut();
                 mainApp->Close();
+                break;
             }
         return;
     }
