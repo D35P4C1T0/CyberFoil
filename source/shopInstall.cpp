@@ -239,8 +239,6 @@ namespace {
 
     void UpdateInstallIcon(const shopInstStuff::ShopItem& item)
     {
-        const bool offlinePackAvailable = inst::offline::HasPackedIcons();
-
         if (item.hasTitleId) {
             const std::uint64_t lookupTitleId = GetOfflineLookupTitleId(item);
             if (lookupTitleId != 0) {
@@ -250,12 +248,6 @@ namespace {
                     return;
                 }
             }
-        }
-
-        // When offline icon pack is present, never hit network icon URLs.
-        if (offlinePackAvailable) {
-            inst::ui::instPage::clearInstallIcon();
-            return;
         }
 
         if (!item.hasIconUrl) {

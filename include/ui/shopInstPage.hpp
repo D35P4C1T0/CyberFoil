@@ -4,7 +4,13 @@
 #include "shopInstall.hpp"
 #include "ui/bottomHint.hpp"
 #include "util/save_sync.hpp"
+#include <atomic>
 #include <cstddef>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <unordered_set>
 #include <vector>
 
 using namespace pu::ui::elm;
@@ -13,6 +19,7 @@ namespace inst::ui {
     {
         public:
             shopInstPage();
+            ~shopInstPage();
             PU_SMART_CTOR(shopInstPage)
             void startShop(bool forceRefresh = false);
             void startInstall();
@@ -59,6 +66,22 @@ namespace inst::ui {
             std::vector<std::string> descriptionOverlayLines;
             int descriptionOverlayOffset = 0;
             int descriptionOverlayVisibleLines = 16;
+            struct IconDownloadRequest {
+                std::uint64_t generation = 0;
+                std::string key;
+                std::string iconUrl;
+                std::string filePath;
+            };
+            std::thread iconDownloadThread;
+            std::mutex iconDownloadMutex;
+            std::condition_variable iconDownloadCv;
+            std::deque<IconDownloadRequest> iconDownloadQueue;
+            std::unordered_set<std::string> iconDownloadQueuedKeys;
+            std::atomic<bool> iconDownloadStopRequested{false};
+            std::uint64_t iconDownloadGeneration = 0;
+            std::size_t iconDownloadTotal = 0;
+            std::size_t iconDownloadCompleted = 0;
+            std::atomic<bool> iconDownloadUiDirty{false};
             bool saveVersionSelectorVisible = false;
             std::uint64_t saveVersionSelectorTitleId = 0;
             bool saveVersionSelectorLocalAvailable = false;
@@ -172,5 +195,9 @@ namespace inst::ui {
             void scrollDescriptionOverlay(int delta);
             void refreshDescriptionOverlayBody();
             void updateDescriptionPanel();
+            void resetIconDownloadState();
+            void queueIconDownload(const shopInstStuff::ShopItem& item, const std::string& filePath);
+            void refreshImageLoadingText(bool showCompleted = false);
+            void iconDownloadThreadMain();
     };
 }

@@ -621,6 +621,34 @@ namespace {
         return inst::offline::TryGetIconData(baseId, outData);
     }
 
+    std::string GetShopGridIconCachePath(const shopInstStuff::ShopItem& item)
+    {
+        if (!item.hasIconUrl)
+            return "";
+
+        std::string cacheDir = inst::config::appDir + "/shop_icons";
+        if (!std::filesystem::exists(cacheDir))
+            std::filesystem::create_directory(cacheDir);
+
+        std::string urlPath = item.iconUrl;
+        std::string ext = ".jpg";
+        auto queryPos = urlPath.find('?');
+        std::string cleanPath = queryPos == std::string::npos ? urlPath : urlPath.substr(0, queryPos);
+        auto dotPos = cleanPath.find_last_of('.');
+        if (dotPos != std::string::npos) {
+            std::string suffix = cleanPath.substr(dotPos);
+            if (suffix.size() <= 5 && suffix.find('/') == std::string::npos && suffix.find('?') == std::string::npos)
+                ext = suffix;
+        }
+
+        std::string fileName;
+        if (item.hasTitleId)
+            fileName = std::to_string(item.titleId);
+        else
+            fileName = std::to_string(std::hash<std::string>{}(item.iconUrl));
+        return cacheDir + "/" + fileName + ext;
+    }
+
     bool IsBaseTitleCurrentlyInstalled(u64 baseTitleId)
     {
         s32 metaCount = 0;
@@ -1021,6 +1049,142 @@ namespace inst::ui {
         this->Add(this->saveVersionSelectorMenu);
         this->Add(this->saveVersionSelectorDetailText);
         this->Add(this->saveVersionSelectorHintText);
+        this->iconDownloadThread = std::thread([this]() {
+            this->iconDownloadThreadMain();
+        });
+    }
+
+    shopInstPage::~shopInstPage() {
+        this->iconDownloadStopRequested.store(true);
+        this->iconDownloadCv.notify_all();
+        if (this->iconDownloadThread.joinable())
+            this->iconDownloadThread.join();
+    }
+
+    void shopInstPage::resetIconDownloadState() {
+        {
+            std::lock_guard<std::mutex> lock(this->iconDownloadMutex);
+            this->iconDownloadGeneration++;
+            this->iconDownloadQueue.clear();
+            this->iconDownloadQueuedKeys.clear();
+            this->iconDownloadTotal = 0;
+            this->iconDownloadCompleted = 0;
+        }
+        this->iconDownloadUiDirty.store(false);
+        this->imageLoadingUntilTick = 0;
+        this->imageLoadingText->SetVisible(false);
+    }
+
+    void shopInstPage::queueIconDownload(const shopInstStuff::ShopItem& item, const std::string& filePath) {
+        if (!item.hasIconUrl || item.iconUrl.empty() || filePath.empty())
+            return;
+
+        std::string key = BuildItemIdentityKey(item);
+        if (key.empty())
+            key = item.iconUrl;
+
+        std::lock_guard<std::mutex> lock(this->iconDownloadMutex);
+        if (this->iconDownloadQueuedKeys.count(key))
+            return;
+
+        this->iconDownloadQueuedKeys.insert(key);
+        this->iconDownloadQueue.push_back({this->iconDownloadGeneration, key, item.iconUrl, filePath});
+        this->iconDownloadTotal++;
+        this->iconDownloadCv.notify_one();
+    }
+
+    void shopInstPage::refreshImageLoadingText(bool showCompleted) {
+        std::size_t total = 0;
+        std::size_t completed = 0;
+        {
+            std::lock_guard<std::mutex> lock(this->iconDownloadMutex);
+            total = this->iconDownloadTotal;
+            completed = this->iconDownloadCompleted;
+        }
+
+        if (total == 0) {
+            this->imageLoadingText->SetVisible(false);
+            return;
+        }
+
+        this->imageLoadingText->SetText(
+            "Fetching images " + std::to_string(completed) + "/" + std::to_string(total));
+        this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
+
+        if (completed < total) {
+            this->imageLoadingText->SetVisible(true);
+            return;
+        }
+
+        if (showCompleted && this->imageLoadingUntilTick == 0) {
+            const u64 now = armGetSystemTick();
+            const u64 freq = armGetSystemTickFreq();
+            this->imageLoadingUntilTick = now + (freq * 2);
+        }
+
+        if (this->imageLoadingUntilTick > 0) {
+            const u64 now = armGetSystemTick();
+            const bool show = now < this->imageLoadingUntilTick;
+            this->imageLoadingText->SetVisible(show);
+            if (!show) {
+                this->imageLoadingUntilTick = 0;
+                std::lock_guard<std::mutex> lock(this->iconDownloadMutex);
+                this->iconDownloadTotal = 0;
+                this->iconDownloadCompleted = 0;
+                this->iconDownloadQueuedKeys.clear();
+            }
+            return;
+        }
+
+        this->imageLoadingText->SetVisible(false);
+    }
+
+    void shopInstPage::iconDownloadThreadMain() {
+        while (true) {
+            IconDownloadRequest request;
+            {
+                std::unique_lock<std::mutex> lock(this->iconDownloadMutex);
+                this->iconDownloadCv.wait(lock, [this]() {
+                    return this->iconDownloadStopRequested.load() || !this->iconDownloadQueue.empty();
+                });
+                if (this->iconDownloadStopRequested.load())
+                    return;
+
+                request = this->iconDownloadQueue.front();
+                this->iconDownloadQueue.pop_front();
+            }
+
+            bool ok = true;
+            const std::string tempPath = request.filePath + ".part";
+            if (!std::filesystem::exists(request.filePath)) {
+                if (std::filesystem::exists(tempPath))
+                    std::filesystem::remove(tempPath);
+
+                ok = inst::curl::downloadImageWithAuth(request.iconUrl, tempPath.c_str(), inst::config::shopUser, inst::config::shopPass, 8000);
+                if (ok) {
+                    std::error_code ec;
+                    std::filesystem::rename(tempPath, request.filePath, ec);
+                    ok = !ec;
+                }
+            }
+
+            if (std::filesystem::exists(tempPath))
+                std::filesystem::remove(tempPath);
+            if (!ok && std::filesystem::exists(request.filePath))
+                std::filesystem::remove(request.filePath);
+
+            bool refreshCurrentUi = false;
+            {
+                std::lock_guard<std::mutex> lock(this->iconDownloadMutex);
+                if (request.generation == this->iconDownloadGeneration) {
+                    this->iconDownloadCompleted++;
+                    refreshCurrentUi = true;
+                }
+            }
+
+            if (refreshCurrentUi)
+                this->iconDownloadUiDirty.store(true);
+        }
     }
 
     bool shopInstPage::isAllSection() const {
@@ -2367,13 +2531,13 @@ namespace inst::ui {
         if (this->shopGridMode) {
             this->previewImage->SetVisible(false);
             this->previewKey.clear();
-            this->imageLoadingText->SetVisible(false);
+            this->refreshImageLoadingText();
             return;
         }
         if (this->visibleItems.empty()) {
             this->previewImage->SetVisible(false);
             this->previewKey.clear();
-            this->imageLoadingText->SetVisible(false);
+            this->refreshImageLoadingText();
             return;
         }
 
@@ -2383,8 +2547,6 @@ namespace inst::ui {
         const auto& item = this->visibleItems[selectedIndex];
         std::uint64_t offlineIconBaseId = 0;
         const bool hasOfflineIcon = HasOfflineIconForItem(item, &offlineIconBaseId);
-        const bool offlinePackAvailable = inst::offline::HasPackedIcons();
-
         std::string key;
         if (item.url.empty()) {
             key = "installed:" + std::to_string(item.titleId);
@@ -2396,32 +2558,18 @@ namespace inst::ui {
             key = item.url;
         }
 
-        if (key == this->previewKey)
-            return;
+        const bool selectionChanged = key != this->previewKey;
         this->previewKey = key;
-
-        bool didDownload = false;
-        bool loadingShown = false;
+        const bool previewNeedsRefresh = this->iconDownloadUiDirty.exchange(false);
+        if (!selectionChanged && !previewNeedsRefresh) {
+            this->refreshImageLoadingText(true);
+            return;
+        }
         auto applyPreviewLayout = [&]() {
             this->previewImage->SetX(900);
             this->previewImage->SetY(230);
             this->previewImage->SetWidth(320);
             this->previewImage->SetHeight(320);
-        };
-        auto updateLoadingText = [&]() {
-            if (didDownload) {
-                const u64 now = armGetSystemTick();
-                const u64 freq = armGetSystemTickFreq();
-                this->imageLoadingUntilTick = now + (freq * 2);
-            }
-            if (this->imageLoadingUntilTick > 0) {
-                const u64 now = armGetSystemTick();
-                bool show = now < this->imageLoadingUntilTick;
-                this->imageLoadingText->SetVisible(show);
-                if (show) {
-                    this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
-                }
-            }
         };
 
         if (item.url.empty()) {
@@ -2447,7 +2595,7 @@ namespace inst::ui {
             this->previewImage->SetImage("romfs:/images/icons/title-placeholder.png");
             applyPreviewLayout();
             this->previewImage->SetVisible(true);
-            updateLoadingText();
+            this->refreshImageLoadingText();
             return;
         }
 
@@ -2457,69 +2605,29 @@ namespace inst::ui {
                 this->previewImage->SetJpegImage(offlineIconData.data(), static_cast<s32>(offlineIconData.size()));
                 applyPreviewLayout();
                 this->previewImage->SetVisible(true);
-                updateLoadingText();
+                this->refreshImageLoadingText();
                 return;
             }
         }
 
-        if (!offlinePackAvailable && item.hasIconUrl) {
-            std::string cacheDir = inst::config::appDir + "/shop_icons";
-            if (!std::filesystem::exists(cacheDir))
-                std::filesystem::create_directory(cacheDir);
-
-            std::string urlPath = item.iconUrl;
-            std::string ext = ".jpg";
-            auto queryPos = urlPath.find('?');
-            std::string cleanPath = queryPos == std::string::npos ? urlPath : urlPath.substr(0, queryPos);
-            auto dotPos = cleanPath.find_last_of('.');
-            if (dotPos != std::string::npos) {
-                std::string suffix = cleanPath.substr(dotPos);
-                if (suffix.size() <= 5 && suffix.find('/') == std::string::npos && suffix.find('?') == std::string::npos)
-                    ext = suffix;
-            }
-
-            std::string fileName;
-            if (item.hasTitleId)
-                fileName = std::to_string(item.titleId);
-            else
-                fileName = std::to_string(std::hash<std::string>{}(item.iconUrl));
-            std::string filePath = cacheDir + "/" + fileName + ext;
-
-            if (!std::filesystem::exists(filePath)) {
-                if (!loadingShown) {
-                    this->imageLoadingText->SetText("Fetching images 0/1");
-                    this->imageLoadingText->SetVisible(true);
-                    this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
-                    mainApp->CallForRender();
-                    loadingShown = true;
-                }
-                didDownload = true;
-                bool ok = inst::curl::downloadImageWithAuth(item.iconUrl, filePath.c_str(), inst::config::shopUser, inst::config::shopPass, 8000);
-                if (!ok) {
-                    if (std::filesystem::exists(filePath))
-                        std::filesystem::remove(filePath);
-                }
-            }
-
+        if (item.hasIconUrl) {
+            const std::string filePath = GetShopGridIconCachePath(item);
             if (std::filesystem::exists(filePath)) {
                 this->previewImage->SetImage(filePath);
                 applyPreviewLayout();
                 this->previewImage->SetVisible(true);
-                if (loadingShown) {
-                    this->imageLoadingText->SetText("Fetching images 1/1");
-                    this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
-                    mainApp->CallForRender();
-                }
-                updateLoadingText();
+                this->refreshImageLoadingText(true);
                 return;
             }
 
+            this->queueIconDownload(item, filePath);
+            this->refreshImageLoadingText();
         }
 
         this->previewImage->SetImage("romfs:/images/icons/title-placeholder.png");
         applyPreviewLayout();
         this->previewImage->SetVisible(true);
-        updateLoadingText();
+        this->refreshImageLoadingText();
     }
 
 
@@ -2590,6 +2698,7 @@ namespace inst::ui {
 
     void shopInstPage::drawMenuItems(bool clearItems) {
         if (clearItems) this->selectedItems.clear();
+        this->resetIconDownloadState();
         this->emptySectionText->SetVisible(false);
         this->listMarqueeMaskRect->SetVisible(false);
         this->listMarqueeTintRect->SetVisible(false);
@@ -2865,54 +2974,8 @@ namespace inst::ui {
         int page = this->shopGridIndex / kGridItemsPerPage;
         int pageStart = page * kGridItemsPerPage;
         int maxIndex = (int)this->visibleItems.size();
-        const bool offlinePackAvailable = inst::offline::HasPackedIcons();
-
-        bool didDownload = false;
         if (page != this->shopGridPage) {
-            std::string cacheDir = inst::config::appDir + "/shop_icons";
-            if (!std::filesystem::exists(cacheDir))
-                std::filesystem::create_directory(cacheDir);
-            int totalToDownload = 0;
-            for (int i = 0; i < kGridItemsPerPage; i++) {
-                int itemIndex = pageStart + i;
-                if (itemIndex >= maxIndex)
-                    continue;
-                const auto& item = this->visibleItems[itemIndex];
-                if (HasOfflineIconForItem(item))
-                    continue;
-                if (offlinePackAvailable)
-                    continue;
-                if (!item.hasIconUrl)
-                    continue;
-                std::string urlPath = item.iconUrl;
-                std::string ext = ".jpg";
-                auto queryPos = urlPath.find('?');
-                std::string cleanPath = queryPos == std::string::npos ? urlPath : urlPath.substr(0, queryPos);
-                auto dotPos = cleanPath.find_last_of('.');
-                if (dotPos != std::string::npos) {
-                    std::string suffix = cleanPath.substr(dotPos);
-                    if (suffix.size() <= 5 && suffix.find('/') == std::string::npos && suffix.find('?') == std::string::npos)
-                        ext = suffix;
-                }
-                std::string fileName;
-                if (item.hasTitleId)
-                    fileName = std::to_string(item.titleId);
-                else
-                    fileName = std::to_string(std::hash<std::string>{}(item.iconUrl));
-                std::string filePath = cacheDir + "/" + fileName + ext;
-                if (!std::filesystem::exists(filePath))
-                    totalToDownload++;
-            }
-
-            bool loadingShown = false;
-            int downloadedCount = 0;
-            if (totalToDownload > 0) {
-                this->imageLoadingText->SetText("Fetching images 0/" + std::to_string(totalToDownload));
-                this->imageLoadingText->SetVisible(true);
-                this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
-                mainApp->CallForRender();
-                loadingShown = true;
-            }
+            this->resetIconDownloadState();
 
             for (int i = 0; i < kGridItemsPerPage; i++) {
                 int itemIndex = pageStart + i;
@@ -2937,70 +3000,46 @@ namespace inst::ui {
                     this->gridImages[i]->SetWidth(kGridTileWidth);
                     this->gridImages[i]->SetHeight(kGridTileHeight);
                     applied = true;
-                } else if (!offlinePackAvailable && item.hasIconUrl) {
-                    std::string urlPath = item.iconUrl;
-                    std::string ext = ".jpg";
-                    auto queryPos = urlPath.find('?');
-                    std::string cleanPath = queryPos == std::string::npos ? urlPath : urlPath.substr(0, queryPos);
-                    auto dotPos = cleanPath.find_last_of('.');
-                    if (dotPos != std::string::npos) {
-                        std::string suffix = cleanPath.substr(dotPos);
-                        if (suffix.size() <= 5 && suffix.find('/') == std::string::npos && suffix.find('?') == std::string::npos)
-                            ext = suffix;
+                } else if (item.hasIconUrl) {
+                    std::string filePath = GetShopGridIconCachePath(item);
+                    if (!filePath.empty() && std::filesystem::exists(filePath)) {
+                        this->gridImages[i]->SetImage(filePath);
+                        this->gridImages[i]->SetWidth(kGridTileWidth);
+                        this->gridImages[i]->SetHeight(kGridTileHeight);
+                        applied = true;
+                    } else if (!filePath.empty()) {
+                        this->queueIconDownload(item, filePath);
                     }
+                }
 
-                    std::string fileName;
-                    if (item.hasTitleId)
-                        fileName = std::to_string(item.titleId);
-                    else
-                        fileName = std::to_string(std::hash<std::string>{}(item.iconUrl));
-                    std::string filePath = cacheDir + "/" + fileName + ext;
-
-                    if (!std::filesystem::exists(filePath)) {
-                        didDownload = true;
-                        bool ok = inst::curl::downloadImageWithAuth(item.iconUrl, filePath.c_str(), inst::config::shopUser, inst::config::shopPass, 8000);
-                        if (!ok && std::filesystem::exists(filePath))
-                            std::filesystem::remove(filePath);
-                        if (loadingShown) {
-                            downloadedCount++;
-                            this->imageLoadingText->SetText("Fetching images " + std::to_string(downloadedCount) + "/" + std::to_string(totalToDownload));
-                            this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
-                            mainApp->CallForRender();
-                        }
-                    }
-
-                if (std::filesystem::exists(filePath)) {
-                    this->gridImages[i]->SetImage(filePath);
+                if (!applied) {
+                    this->gridImages[i]->SetImage("romfs:/images/icons/title-placeholder.png");
                     this->gridImages[i]->SetWidth(kGridTileWidth);
                     this->gridImages[i]->SetHeight(kGridTileHeight);
-                    applied = true;
                 }
+                this->gridImages[i]->SetVisible(true);
             }
 
-            if (!applied) {
-                this->gridImages[i]->SetImage("romfs:/images/icons/title-placeholder.png");
-                this->gridImages[i]->SetWidth(kGridTileWidth);
-                this->gridImages[i]->SetHeight(kGridTileHeight);
-            }
-            this->gridImages[i]->SetVisible(true);
-
-        }
             this->shopGridPage = page;
         }
 
-        if (didDownload) {
-            const u64 now = armGetSystemTick();
-            const u64 freq = armGetSystemTickFreq();
-            this->imageLoadingUntilTick = now + (freq * 2);
-        }
-        if (this->imageLoadingUntilTick > 0) {
-            const u64 now = armGetSystemTick();
-            bool show = now < this->imageLoadingUntilTick;
-            this->imageLoadingText->SetVisible(show);
-            if (show) {
-                this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
+        if (this->iconDownloadUiDirty.exchange(false)) {
+            for (int i = 0; i < kGridItemsPerPage; i++) {
+                const int itemIndex = pageStart + i;
+                if (itemIndex < 0 || itemIndex >= maxIndex)
+                    continue;
+
+                const auto& item = this->visibleItems[itemIndex];
+                const std::string filePath = GetShopGridIconCachePath(item);
+                if (!filePath.empty() && std::filesystem::exists(filePath)) {
+                    this->gridImages[i]->SetImage(filePath);
+                    this->gridImages[i]->SetWidth(kGridTileWidth);
+                    this->gridImages[i]->SetHeight(kGridTileHeight);
+                    this->gridImages[i]->SetVisible(true);
+                }
             }
         }
+        this->refreshImageLoadingText(true);
 
         for (int i = 0; i < kGridItemsPerPage; i++) {
             int itemIndex = pageStart + i;
