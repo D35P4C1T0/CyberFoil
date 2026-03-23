@@ -40,6 +40,7 @@ namespace inst::config {
         std::string fileName;
         std::string protocol;
         std::string host;
+        std::string path;
         int port = 8465;
         std::string username;
         std::string password;
@@ -50,6 +51,8 @@ namespace inst::config {
 
     int DefaultPortForProtocol(const std::string& protocol);
     std::string NormalizeHttpUserAgentMode(const std::string& mode);
+    std::string NormalizeShopPath(const std::string& path);
+    bool ParseShopUrl(const std::string& rawUrl, std::string& protocol, std::string& host, int& port, std::string& path);
     std::string BuildShopUrl(const ShopProfile& shop);
     std::vector<ShopProfile> LoadShops();
     bool SaveShop(const ShopProfile& shop, std::string* error = nullptr);
