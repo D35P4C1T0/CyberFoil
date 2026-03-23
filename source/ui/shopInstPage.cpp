@@ -2741,19 +2741,32 @@ namespace inst::ui {
 
         const bool installedSection = this->isInstalledSection();
         const bool saveSyncSection = this->isSaveSyncSection();
+        std::unordered_set<std::string> selectedUrls;
+        if (!installedSection && !saveSyncSection && !this->selectedItems.empty()) {
+            selectedUrls.reserve(this->selectedItems.size());
+            for (const auto& selected : this->selectedItems) {
+                if (!selected.url.empty())
+                    selectedUrls.insert(selected.url);
+            }
+        }
+        const bool useFastListLabels = this->visibleItems.size() > 400;
         for (std::size_t i = 0; i < this->visibleItems.size(); i++) {
             const auto& item = this->visibleItems[i];
-            std::string itm = this->buildListMenuLabel(item);
+            std::string itm;
+            if (useFastListLabels) {
+                itm = OverflowText::NormalizeSingleLineText(item.name);
+                std::string sizeText = FormatSizeText(item.size);
+                if (!sizeText.empty())
+                    itm += " [" + sizeText + "]";
+            } else {
+                itm = this->buildListMenuLabel(item);
+            }
             auto entry = pu::ui::elm::MenuItem::New(itm);
             entry->SetColor(COLOR("#FFFFFFFF"));
             if (!installedSection && !saveSyncSection) {
                 entry->SetIcon("romfs:/images/icons/checkbox-blank-outline.png");
-                for (const auto& selected : this->selectedItems) {
-                    if (selected.url == item.url) {
-                        entry->SetIcon("romfs:/images/icons/check-box-outline.png");
-                        break;
-                    }
-                }
+                if (!item.url.empty() && selectedUrls.find(item.url) != selectedUrls.end())
+                    entry->SetIcon("romfs:/images/icons/check-box-outline.png");
             }
             this->menu->AddItem(entry);
         }
@@ -2778,6 +2791,29 @@ namespace inst::ui {
         this->listMarqueeFadeAlpha = 0;
         this->updateListMarquee(true);
         this->updateDescriptionPanel();
+    }
+
+    void shopInstPage::refreshListSelectionIcons() {
+        if (this->menu->GetItems().empty())
+            return;
+        if (this->isInstalledSection() || this->isSaveSyncSection())
+            return;
+
+        std::unordered_set<std::string> selectedUrls;
+        selectedUrls.reserve(this->selectedItems.size());
+        for (const auto& selected : this->selectedItems) {
+            if (!selected.url.empty())
+                selectedUrls.insert(selected.url);
+        }
+
+        auto& menuItems = this->menu->GetItems();
+        const std::size_t count = std::min(menuItems.size(), this->visibleItems.size());
+        for (std::size_t i = 0; i < count; i++) {
+            const auto& item = this->visibleItems[i];
+            const bool isSelected = !item.url.empty() && selectedUrls.find(item.url) != selectedUrls.end();
+            menuItems[i]->SetIcon(isSelected ? "romfs:/images/icons/check-box-outline.png"
+                                             : "romfs:/images/icons/checkbox-blank-outline.png");
+        }
     }
 
     void shopInstPage::updateInstalledGrid() {
@@ -3087,7 +3123,20 @@ namespace inst::ui {
             }
         }
         this->updateRememberedSelection();
-        this->drawMenuItems(false);
+        if (this->shopGridMode) {
+            if (this->isInstalledSection()) {
+                this->gridSelectedIndex = this->shopGridIndex;
+                this->updateInstalledGrid();
+            } else {
+                this->updateShopGrid();
+            }
+            return;
+        }
+
+        if (this->menu->GetItems().size() == this->visibleItems.size())
+            this->refreshListSelectionIcons();
+        else
+            this->drawMenuItems(false);
     }
 
     void shopInstPage::updateRememberedSelection() {
@@ -3551,6 +3600,16 @@ namespace inst::ui {
                     this->updateShopGrid();
                 }
             } else {
+                // Ensure list mode visibility is fully applied even when we skip full list rebuild.
+                for (auto& img : this->gridImages)
+                    img->SetVisible(false);
+                this->gridHighlight->SetVisible(false);
+                this->gridTitleText->SetVisible(false);
+                for (auto& highlight : this->shopGridSelectHighlights)
+                    highlight->SetVisible(false);
+                for (auto& icon : this->shopGridSelectIcons)
+                    icon->SetVisible(false);
+                this->menu->SetVisible(true);
                 if (!this->menu->GetItems().empty()) {
                     int sel = this->shopGridIndex;
                     if (sel < 0 || sel >= (int)this->menu->GetItems().size())
@@ -3559,8 +3618,12 @@ namespace inst::ui {
                 }
                 this->updateSectionText();
                 this->updateButtonsText();
-                this->drawMenuItems(false);
+                if (this->menu->GetItems().size() == this->visibleItems.size())
+                    this->refreshListSelectionIcons();
+                else
+                    this->drawMenuItems(false);
                 this->updatePreview();
+                this->updateListMarquee(true);
             }
             this->updateDescriptionPanel();
             return;
@@ -3580,18 +3643,33 @@ namespace inst::ui {
             if (Down & HidNpadButton_Y) {
                 if (!this->isInstalledSection() && !this->isSaveSyncSection()) {
                     if (this->selectedItems.size() == this->visibleItems.size()) {
-                        this->drawMenuItems(true);
+                        this->selectedItems.clear();
+                        this->updateRememberedSelection();
+                        if (this->menu->GetItems().size() == this->visibleItems.size())
+                            this->refreshListSelectionIcons();
+                        else
+                            this->drawMenuItems(false);
+                        this->updateShopGrid();
                     } else {
+                        std::unordered_set<std::string> selectedUrls;
+                        selectedUrls.reserve(this->selectedItems.size());
+                        for (const auto& selected : this->selectedItems) {
+                            if (!selected.url.empty())
+                                selectedUrls.insert(selected.url);
+                        }
                         for (std::size_t i = 0; i < this->visibleItems.size(); i++) {
                             const auto& item = this->visibleItems[i];
-                            const bool alreadySelected = std::any_of(this->selectedItems.begin(), this->selectedItems.end(), [&](const auto& selected) {
-                                return selected.url == item.url;
-                            });
-                            if (alreadySelected)
+                            if (item.url.empty() || selectedUrls.find(item.url) != selectedUrls.end())
                                 continue;
-                            this->selectTitle(static_cast<int>(i));
+                            this->selectedItems.push_back(item);
+                            selectedUrls.insert(item.url);
                         }
-                        this->drawMenuItems(false);
+                        this->updateRememberedSelection();
+                        if (this->menu->GetItems().size() == this->visibleItems.size())
+                            this->refreshListSelectionIcons();
+                        else
+                            this->drawMenuItems(false);
+                        this->updateShopGrid();
                     }
                 }
             }
@@ -3814,13 +3892,25 @@ namespace inst::ui {
         if (Down & HidNpadButton_Y) {
             if (!this->isInstalledSection() && !this->isSaveSyncSection()) {
                 if (this->selectedItems.size() == this->menu->GetItems().size()) {
-                    this->drawMenuItems(true);
+                    this->selectedItems.clear();
+                    this->updateRememberedSelection();
+                    this->refreshListSelectionIcons();
                 } else {
-                    for (long unsigned int i = 0; i < this->menu->GetItems().size(); i++) {
-                        if (this->menu->GetItems()[i]->GetIcon() == "romfs:/images/icons/check-box-outline.png") continue;
-                        this->selectTitle(i);
+                    std::unordered_set<std::string> selectedUrls;
+                    selectedUrls.reserve(this->selectedItems.size());
+                    for (const auto& selected : this->selectedItems) {
+                        if (!selected.url.empty())
+                            selectedUrls.insert(selected.url);
                     }
-                    this->drawMenuItems(false);
+                    for (std::size_t i = 0; i < this->visibleItems.size(); i++) {
+                        const auto& item = this->visibleItems[i];
+                        if (item.url.empty() || selectedUrls.find(item.url) != selectedUrls.end())
+                            continue;
+                        this->selectedItems.push_back(item);
+                        selectedUrls.insert(item.url);
+                    }
+                    this->updateRememberedSelection();
+                    this->refreshListSelectionIcons();
                 }
             }
         }
@@ -3950,7 +4040,6 @@ namespace inst::ui {
             }
         } else {
             this->updatePreview();
-            this->updateShopGrid();
             this->updateListMarquee(false);
         }
         this->updateDescriptionPanel();

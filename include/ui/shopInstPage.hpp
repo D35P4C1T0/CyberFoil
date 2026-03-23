@@ -170,6 +170,7 @@ namespace inst::ui {
             void centerPageInfoText();
             void setLoadingProgress(int percent, bool visible);
             void drawMenuItems(bool clearItems);
+            void refreshListSelectionIcons();
             void selectTitle(int selectedIndex);
             void updateRememberedSelection();
             void updateSectionText();
