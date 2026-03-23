@@ -20,9 +20,11 @@ namespace shopInstStuff {
         std::uint64_t size;
         std::uint64_t titleId = 0;
         std::uint32_t appVersion = 0;
+        std::uint32_t releaseDate = 0;
         std::int32_t appType = -1;
         bool hasTitleId = false;
         bool hasAppVersion = false;
+        bool hasReleaseDate = false;
         bool hasIconUrl = false;
         bool hasAppId = false;
     };

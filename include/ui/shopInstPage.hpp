@@ -64,6 +64,7 @@ namespace inst::ui {
             bool nativeUpdatesSectionPresent = false;
             bool nativeDlcSectionPresent = false;
             bool saveSyncEnabled = false;
+            bool suppressBottomHints = false;
             std::string activeShopUrl;
             BottomHintTouchState bottomHintTouch;
             std::vector<BottomHintSegment> bottomHintSegments;
@@ -71,6 +72,7 @@ namespace inst::ui {
             std::string searchQuery;
             std::string previewKey;
             bool debugVisible = false;
+            int allSortMode = 0;
             bool descriptionVisible = false;
             bool descriptionOverlayVisible = false;
             std::vector<std::string> descriptionOverlayLines;
@@ -169,6 +171,8 @@ namespace inst::ui {
             pu::ui::elm::Menu::Ref saveVersionSelectorMenu;
             void centerPageInfoText();
             void setLoadingProgress(int percent, bool visible);
+            void applyAllSectionSort();
+            std::string getAllSortModeLabel() const;
             void drawMenuItems(bool clearItems);
             void refreshListSelectionIcons();
             void selectTitle(int selectedIndex);

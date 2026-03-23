@@ -2,6 +2,7 @@
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <curl/curl.h>
 #include <filesystem>
 #include <fstream>
@@ -422,6 +423,66 @@ namespace {
         return false;
     }
 
+    bool TryParseReleaseDateText(const std::string& text, std::uint32_t& out)
+    {
+        std::string digits;
+        digits.reserve(text.size());
+        for (unsigned char c : text) {
+            if (std::isdigit(c))
+                digits.push_back(static_cast<char>(c));
+        }
+        if (digits.size() >= 8) {
+            const std::string yyyymmdd = digits.substr(0, 8);
+            out = static_cast<std::uint32_t>(std::strtoul(yyyymmdd.c_str(), nullptr, 10));
+            return out != 0;
+        }
+        return false;
+    }
+
+    bool TryParseReleaseDate(const nlohmann::json& entry, std::uint32_t& out)
+    {
+        static const char* kKeys[] = {
+            "release_date",
+            "releaseDate",
+            "release",
+            "date"
+        };
+
+        for (const char* key : kKeys) {
+            if (!entry.contains(key))
+                continue;
+            const auto& value = entry[key];
+            if (value.is_number_unsigned()) {
+                const auto parsed = value.get<std::uint64_t>();
+                if (parsed == 0)
+                    continue;
+                if (parsed >= 10000101ULL) {
+                    out = static_cast<std::uint32_t>(parsed);
+                    return true;
+                }
+                continue;
+            }
+            if (value.is_number_integer()) {
+                const auto parsed = value.get<long long>();
+                if (parsed <= 0)
+                    continue;
+                if (parsed >= 10000101LL) {
+                    out = static_cast<std::uint32_t>(parsed);
+                    return true;
+                }
+                continue;
+            }
+            if (value.is_string()) {
+                std::uint32_t parsed = 0;
+                if (TryParseReleaseDateText(value.get<std::string>(), parsed)) {
+                    out = parsed;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     bool NormalizeAppTypeValue(std::int32_t rawValue, std::int32_t& out)
     {
         switch (rawValue) {
@@ -755,6 +816,10 @@ namespace {
                 item.appVersion = meta.version;
                 item.hasAppVersion = true;
             }
+            if (!item.hasReleaseDate && meta.hasReleaseDate && meta.releaseDate > 0) {
+                item.releaseDate = meta.releaseDate;
+                item.hasReleaseDate = true;
+            }
         }
 
     }
@@ -829,6 +894,11 @@ namespace {
                         if (TryParseAppVersion(entry, appVersion)) {
                             item.appVersion = appVersion;
                             item.hasAppVersion = true;
+                        }
+                        std::uint32_t releaseDate = 0;
+                        if (TryParseReleaseDate(entry, releaseDate)) {
+                            item.releaseDate = releaseDate;
+                            item.hasReleaseDate = true;
                         }
                         if (TryParseAppType(entry, appType))
                             item.appType = appType;
@@ -1100,6 +1170,11 @@ namespace shopInstStuff {
                     item.url = fullUrl;
                     item.size = size;
                     ApplyLegacyMetadataFromName(name, item);
+                    std::uint32_t releaseDate = 0;
+                    if (TryParseReleaseDate(entry, releaseDate)) {
+                        item.releaseDate = releaseDate;
+                        item.hasReleaseDate = true;
+                    }
 
                     if (entry.contains("icon_url") && entry["icon_url"].is_string()) {
                         std::string iconUrl = entry["icon_url"].get<std::string>();

@@ -1223,6 +1223,68 @@ namespace inst::ui {
         return this->shopSections[this->selectedSectionIndex].items;
     }
 
+    void shopInstPage::applyAllSectionSort() {
+        if (this->shopSections.empty())
+            return;
+
+        auto it = std::find_if(this->shopSections.begin(), this->shopSections.end(), [](const auto& section) {
+            return section.id == "all";
+        });
+        if (it == this->shopSections.end())
+            return;
+
+        auto byNameAsc = [](const shopInstStuff::ShopItem& a, const shopInstStuff::ShopItem& b) {
+            return inst::util::ignoreCaseCompare(a.name, b.name);
+        };
+
+        auto byDateAsc = [&](const shopInstStuff::ShopItem& a, const shopInstStuff::ShopItem& b) {
+            if (a.hasReleaseDate != b.hasReleaseDate)
+                return a.hasReleaseDate;
+            if (a.hasReleaseDate && b.hasReleaseDate && a.releaseDate != b.releaseDate)
+                return a.releaseDate < b.releaseDate;
+            return byNameAsc(a, b);
+        };
+
+        auto byDateDesc = [&](const shopInstStuff::ShopItem& a, const shopInstStuff::ShopItem& b) {
+            if (a.hasReleaseDate != b.hasReleaseDate)
+                return a.hasReleaseDate;
+            if (a.hasReleaseDate && b.hasReleaseDate && a.releaseDate != b.releaseDate)
+                return a.releaseDate > b.releaseDate;
+            return byNameAsc(a, b);
+        };
+
+        switch (this->allSortMode) {
+            default:
+            case 0:
+                std::sort(it->items.begin(), it->items.end(), byNameAsc);
+                break;
+            case 1:
+                std::sort(it->items.begin(), it->items.end(), [&](const auto& a, const auto& b) {
+                    return byNameAsc(b, a);
+                });
+                break;
+            case 2:
+                std::sort(it->items.begin(), it->items.end(), byDateAsc);
+                break;
+            case 3:
+                std::sort(it->items.begin(), it->items.end(), byDateDesc);
+                break;
+        }
+    }
+
+    std::string shopInstPage::getAllSortModeLabel() const {
+        switch (this->allSortMode) {
+            case 1:
+                return "Name Z-A";
+            case 2:
+                return "Release Date Old-New";
+            case 3:
+                return "Release Date New-Old";
+            default:
+                return "Name A-Z";
+        }
+    }
+
     void shopInstPage::updateSectionText() {
         if (this->shopSections.empty()) {
             this->pageInfoText->SetText("inst.shop.loading"_lang);
@@ -1233,9 +1295,19 @@ namespace inst::ui {
         const auto& section = this->shopSections[this->selectedSectionIndex];
         this->pageInfoText->SetText(section.title);
         CenterTextX(this->pageInfoText);
+        std::string rightInfo;
         if (!this->searchQuery.empty()) {
             std::string query = inst::util::shortenString(this->searchQuery, 28, true);
-            this->searchInfoText->SetText("Search: " + query);
+            rightInfo = "Search: " + query;
+        }
+        if (this->isAllSection()) {
+            if (!rightInfo.empty())
+                rightInfo += " | ";
+            rightInfo += "Sort: " + this->getAllSortModeLabel();
+        }
+
+        if (!rightInfo.empty()) {
+            this->searchInfoText->SetText(rightInfo);
             int x = 1280 - this->searchInfoText->GetTextWidth() - 12;
             if (x < 0)
                 x = 0;
@@ -1592,8 +1664,12 @@ namespace inst::ui {
             this->setButtonsText(" Manage Save     Refresh    / Section     Cancel");
         else if (this->isInstalledSection())
             this->setButtonsText("inst.shop.buttons_installed"_lang);
-        else
-            this->setButtonsText("inst.shop.buttons_all"_lang);
+        else {
+            std::string buttonsText = "inst.shop.buttons_all"_lang;
+            if (this->isAllSection())
+                buttonsText += "    \xEE\x83\x85 Sort";
+            this->setButtonsText(buttonsText);
+        }
     }
 
     void shopInstPage::buildInstalledSection() {
@@ -3145,6 +3221,7 @@ namespace inst::ui {
     void shopInstPage::startShop(bool forceRefresh) {
         ResetShopDlcTrace();
         ShopDlcTrace("startShop begin forceRefresh=%d shopHideInstalled=%d hideInstalledSection=%d", forceRefresh ? 1 : 0, inst::config::shopHideInstalled ? 1 : 0, inst::config::shopHideInstalledSection ? 1 : 0);
+        this->suppressBottomHints = true;
         this->nativeUpdatesSectionPresent = false;
         this->nativeDlcSectionPresent = false;
         this->saveSyncEnabled = false;
@@ -3349,6 +3426,7 @@ namespace inst::ui {
         this->cacheAvailableUpdates();
         ShopDlcTrace("after cacheAvailableUpdates availableUpdates=%llu", static_cast<unsigned long long>(this->availableUpdates.size()));
         this->filterOwnedSections();
+        this->applyAllSectionSort();
         if (this->saveSyncEnabled)
             this->buildSaveSyncSection(shopUrl);
         this->setLoadingProgress(100, true);
@@ -3367,6 +3445,7 @@ namespace inst::ui {
         this->gridSelectedIndex = 0;
         this->gridPage = -1;
         this->setLoadingProgress(0, false);
+        this->suppressBottomHints = false;
         this->updateSectionText();
         this->updateButtonsText();
         this->selectedItems.clear();
@@ -3627,6 +3706,34 @@ namespace inst::ui {
             }
             this->updateDescriptionPanel();
             return;
+        }
+        if (Down & HidNpadButton_StickR) {
+            if (this->isAllSection()) {
+                this->allSortMode = (this->allSortMode + 1) % 4;
+                this->applyAllSectionSort();
+                this->shopGridPage = -1;
+                this->gridPage = -1;
+                this->drawMenuItems(false);
+
+                if (!this->visibleItems.empty()) {
+                    if (this->shopGridMode) {
+                        this->shopGridIndex = 0;
+                        if (this->isInstalledSection())
+                            this->gridSelectedIndex = 0;
+                        else
+                            this->updateShopGrid();
+                    } else if (!this->menu->GetItems().empty()) {
+                        this->menu->SetSelectedIndex(0);
+                        this->updatePreview();
+                        this->updateListMarquee(true);
+                    }
+                }
+
+                this->updateSectionText();
+                this->updateButtonsText();
+                this->updateDescriptionPanel();
+                return;
+            }
         }
         if (Down & HidNpadButton_ZL) {
             this->showCurrentDescriptionDialog();
@@ -4267,10 +4374,37 @@ namespace inst::ui {
     }
 
     void shopInstPage::setButtonsText(const std::string& text) {
+        if (this->suppressBottomHints) {
+            this->butText->SetText("");
+            this->bottomHintSegments.clear();
+            return;
+        }
         std::string fullText = text;
-        fullText += "     ";
-        fullText += "Show Desc";
+        fullText += "     Desc";
+        int hintFontSize = 18;
+        this->butText->SetFontSize(hintFontSize);
         this->butText->SetText(fullText);
-        this->bottomHintSegments = BuildBottomHintSegments(fullText, 10, 20);
+        constexpr int kHintMaxWidth = 1260;
+        if (this->butText->GetTextWidth() > kHintMaxWidth) {
+            hintFontSize = 16;
+            this->butText->SetFontSize(hintFontSize);
+            this->butText->SetText(fullText);
+            if (this->butText->GetTextWidth() > kHintMaxWidth) {
+                hintFontSize = 14;
+                this->butText->SetFontSize(hintFontSize);
+                this->butText->SetText(fullText);
+                if (this->butText->GetTextWidth() > kHintMaxWidth) {
+                    hintFontSize = 12;
+                    this->butText->SetFontSize(hintFontSize);
+                    this->butText->SetText(fullText);
+                    if (this->butText->GetTextWidth() > kHintMaxWidth) {
+                        hintFontSize = 10;
+                        this->butText->SetFontSize(hintFontSize);
+                        this->butText->SetText(fullText);
+                    }
+                }
+            }
+        }
+        this->bottomHintSegments = BuildBottomHintSegments(fullText, 10, hintFontSize);
     }
 }
