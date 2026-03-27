@@ -38,6 +38,79 @@ void append(std::vector<u8>& buffer, const u8* ptr, u64 sz)
      memcpy(buffer.data() + offset, ptr, sz);
 }
 
+//// Wrapper over AES128-CTR to handle seek+encrypt/decrypt
+class Aes128CtrCipher
+{
+public:
+     // NOTE: Switch is Little Endian so we byte-swap here for convenience
+     Aes128CtrCipher(const u8* key, const u8* counter)
+     : crypto(key, Crypto::AesCtr(Crypto::swapEndian(((const u64*)counter)[0])))
+     {
+     }
+
+     void decrypt(void* p, u64 sz, u64 offset)
+     {
+          crypto.seek(offset);
+          crypto.decrypt(p, p, sz);
+     }
+
+     void encrypt(void* p, u64 sz, u64 offset)
+     {
+          crypto.seek(offset);
+          crypto.encrypt(p, p, sz);
+     }
+
+     Crypto::Aes128Ctr crypto; // Counter (Ctr) mode, for streaming
+};
+
+// region Header Structs
+
+//// NCZSECTN Section Header structure
+struct NczSectionHeader
+{
+     u64 offset;
+     u64 size;
+     u8 cryptoType;
+     u8 padding1[7];
+     u64 padding2;
+     u8 cryptoKey[0x10];
+     u8 cryptoCounter[0x10];
+} NX_PACKED;
+
+class NczHeader
+{
+public:
+     static const u64 MAGIC = 0x4E544345535A434E;
+     static constexpr size_t MIN_HEADER_SIZE = sizeof(u64) * 2; // magic + sectionCount
+
+     const bool isValid()
+     {
+          return m_magic == MAGIC && m_sectionCount < 0xFFFF;
+     }
+
+     const u64 size() const
+     {
+          return sizeof(m_magic) + sizeof(m_sectionCount) + sizeof(NczSectionHeader) * m_sectionCount;
+     }
+
+     const NczSectionHeader& section(u64 i) const
+     {
+          return m_sections[i];
+     }
+
+     const u64 sectionCount() const
+     {
+          return m_sectionCount;
+     }
+
+protected:
+     u64 m_magic;
+     u64 m_sectionCount;
+     NczSectionHeader m_sections[1];
+} NX_PACKED;
+
+// endregion
+
 // region NcaBodyWriter methods
 
 NcaBodyWriter::NcaBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage)
@@ -98,86 +171,6 @@ bool NcaBodyWriter::isOpen() const
 
 // endregion
 
-class NczHeader
-{
-public:
-     static const u64 MAGIC = 0x4E544345535A434E;
-     static constexpr size_t MIN_HEADER_SIZE = sizeof(u64) * 2; // magic + sectionCount
-
-     class Section
-     {
-     public:
-          u64 offset;
-          u64 size;
-          u8 cryptoType;
-          u8 padding1[7];
-          u64 padding2;
-          u8 cryptoKey[0x10];
-          u8 cryptoCounter[0x10];
-     } NX_PACKED;
-
-     class SectionContext : public Section
-     {
-     public:
-          SectionContext(const Section& s) : Section(s), crypto(s.cryptoKey, Crypto::AesCtr(Crypto::swapEndian(((u64*)&s.cryptoCounter)[0])))
-          {
-          }
-
-          virtual ~SectionContext()
-          {
-          }
-
-          void decrypt(void* p, u64 sz, u64 offset)
-          {
-               if (this->cryptoType != 3)
-               {
-                    return;
-               }
-
-               crypto.seek(offset);
-               crypto.decrypt(p, p, sz);
-          }
-
-          void encrypt(void* p, u64 sz, u64 offset)
-          {
-               if (this->cryptoType != 3)
-               {
-                    return;
-               }
-
-               crypto.seek(offset);
-               crypto.encrypt(p, p, sz);
-          }
-
-          Crypto::Aes128Ctr crypto;
-     };
-
-     const bool isValid()
-     {
-          return m_magic == MAGIC && m_sectionCount < 0xFFFF;
-     }
-
-     const u64 size() const
-     {
-          return sizeof(m_magic) + sizeof(m_sectionCount) + sizeof(Section) * m_sectionCount;
-     }
-
-     const Section& section(u64 i) const
-     {
-          return m_sections[i];
-     }
-
-     const u64 sectionCount() const
-     {
-          return m_sectionCount;
-     }
-
-protected:
-     u64 m_magic;
-     u64 m_sectionCount;
-     Section m_sections[1];
-} NX_PACKED;
-
 class NczBodyWriter : public NcaBodyWriter
 {
 public:
@@ -195,7 +188,7 @@ public:
      {
           close();
 
-          currentContext.reset(); // unique_ptr handles delete
+          currentSectionCipher.reset(); // unique_ptr handles delete
           currentSectionIdx = (u64)-1;
           sections.clear(); // reclaim ok
 
@@ -214,7 +207,6 @@ public:
                processChunk(m_buffer.data(), m_buffer.size());
                m_buffer.clear(); // reclaim ok
           }
-          flushDeflateBuffer();
 
           // Ensure all data is flushed to storage
           flushContentBuffer();
@@ -222,85 +214,94 @@ public:
           return true;
      }
 
-     bool flushDeflateBuffer()
+     // Find the section index for the specified offset
+     // Returns -1 if none found
+     int getSectionIndexForOffset(u64 offset)
      {
-          if (m_deflateBuffer.size())
-          {
-               NcaBodyWriter::write(m_deflateBuffer.data(), m_deflateBuffer.size());
-               m_deflateBuffer.resize(0);
-          }
-          return true;
-     }
-
-     // Find the section for the specified offset
-     // and return a SectionContext for it
-     NczHeader::SectionContext* getSectionContextForOffset(u64 offset)
-     {
-          for (u64 i = 0; i < sections.size(); i++)
+          for (int i = 0; i < sections.size(); i++)
           {
                if (offset >= sections[i].offset && offset < sections[i].offset + sections[i].size)
                {
-                    // Recreate context only if different section
-                    if (i != currentSectionIdx) // -1 => true
-                    {
-                         // unique_ptr handles delete + replace
-                         currentContext = std::make_unique<NczHeader::SectionContext>(sections[i]);
-                         currentSectionIdx = i;
-                    }
-                    return currentContext.get(); // unique_ptr lends its pointer
+                    return i;
                }
           }
-          return NULL;
+          return -1;
      }
 
-     u64 nextSectionOffset(u64 offset) const
+     // Find the next closest section index for the specified offset
+     // Returns -1 if none found
+     int getNextSectionIndexForOffset(u64 offset)
      {
-          u64 next = std::numeric_limits<u64>::max();
-          for (u64 i = 0; i < sections.size(); i++)
+          int nextSectionIdx = -1;
+          u64 nextSectionOffset = std::numeric_limits<u64>::max();
+          for (int i = 0; i < sections.size(); i++)
           {
-               if (sections[i].offset > offset && sections[i].offset < next)
+               if (sections[i].offset > offset && sections[i].offset < nextSectionOffset)
                {
-                    next = sections[i].offset;
+                    nextSectionIdx = i;
+                    nextSectionOffset = sections[i].offset;
                }
           }
-          return next;
+          return nextSectionIdx;
      }
 
-     bool encrypt(const void* ptr, u64 sz, u64 offset)
+     bool encrypt(const u8* ptr, u64 sz, u64 offset)
      {
-          const u8* start = (u8*)ptr;
-          const u8* end = start + sz;
-
-          while (start < end)
+          while (sz)
           {
-               NczHeader::SectionContext* s = getSectionContextForOffset(offset);
+               int offsetSectionIdx = getSectionIndexForOffset(offset);
                u64 chunk = sz;
 
-               if (s)
+               if (offsetSectionIdx >= 0)
                {
-                    const u64 sectionEnd = s->offset + s->size;
-                    if (sectionEnd > offset)
+                    NczSectionHeader* offsetSection = &sections[offsetSectionIdx];
+
+                    // Create new context if section changed
+                    if (offsetSectionIdx != currentSectionIdx) // -1 => true
                     {
-                         chunk = std::min<u64>(sz, sectionEnd - offset);
-                         s->encrypt((void*)start, chunk, offset);
+                         currentSectionCipher.reset(); // Delete early as we may not re-assign
+                         if (offsetSection->cryptoType == 3)
+                         {
+                              currentSectionCipher = std::make_unique<Aes128CtrCipher>(offsetSection->cryptoKey, offsetSection->cryptoCounter);
+                         }
+                         currentSectionIdx = offsetSectionIdx;
+                    }
+
+                    const u64 sectionEnd = offsetSection->offset + offsetSection->size;
+
+                    // assert offset < sectionEnd
+
+                    chunk = std::min<u64>(sz, sectionEnd - offset);
+
+                    // assert chunk > 0
+
+                    if (currentSectionCipher)
+                    {
+                         currentSectionCipher->encrypt((void*)ptr, chunk, offset);
                     }
                }
                else
                {
-                    const u64 next = nextSectionOffset(offset);
-                    if (next != std::numeric_limits<u64>::max() && next > offset)
+                    // When an offset doesn't fall within a defined section,
+                    // (i.e. Its not encrypted - Possibly padding),
+                    // We look for the next closest section to determine
+                    // how many unencrypted bytes to account for
+                    int nextSectionIdx = getNextSectionIndexForOffset(offset);
+                    if (nextSectionIdx >= 0)
                     {
-                         chunk = std::min<u64>(sz, next - offset);
+                         NczSectionHeader* nextSection = &sections[nextSectionIdx];
+                         u64 nextSectionStart = nextSection->offset;
+
+                         // assert offset < nextSectionStart
+
+                         chunk = std::min<u64>(sz, nextSectionStart - offset);
                     }
                }
 
-               if (chunk == 0)
-               {
-                    return false;
-               }
+               // assert chunk > 0
 
                offset += chunk;
-               start += chunk;
+               ptr += chunk;
                sz -= chunk;
           }
 
@@ -339,22 +340,9 @@ public:
                          return 0;
                     }
 
-                    size_t len = output.pos;
-                    u8* p = (u8*)buffOut;
-
-                    while(len)
+                    if (output.pos > 0)
                     {
-                         const size_t writeChunkSz = std::min(0x1000000 - m_deflateBuffer.size(), len);
-
-                         append(m_deflateBuffer, p, writeChunkSz);
-
-                         if(m_deflateBuffer.size() >= 0x1000000)
-                         {
-                              flushDeflateBuffer();
-                         }
-
-                         p += writeChunkSz;
-                         len -= writeChunkSz;
+                         NcaBodyWriter::write((u8*)buffOut, output.pos);
                     }
                }
 
@@ -450,13 +438,12 @@ public:
      ZSTD_DCtx* dctx = NULL;
 
      std::vector<u8> m_buffer;
-     std::vector<u8> m_deflateBuffer;
 
      bool m_sectionsInitialized = false;
 
-     std::vector<NczHeader::Section> sections; // Store section data without crypto contexts
-     std::unique_ptr<NczHeader::SectionContext> currentContext; // Crypto context for current section
-     u64 currentSectionIdx = (u64)-1; // Track which section the context is for
+     std::vector<NczSectionHeader> sections;
+     std::unique_ptr<Aes128CtrCipher> currentSectionCipher; // Crypto cipher for current section
+     u64 currentSectionIdx = (u64)-1; // Track which section the cipher is for
 };
 
 NcaWriter::NcaWriter(const NcmContentId& ncaId, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage) : m_ncaId(ncaId), m_contentStorage(contentStorage), m_writer(NULL)
