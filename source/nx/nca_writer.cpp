@@ -38,21 +38,57 @@ void append(std::vector<u8>& buffer, const u8* ptr, u64 sz)
      memcpy(buffer.data() + offset, ptr, sz);
 }
 
-NcaBodyWriter::NcaBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage) : m_contentStorage(contentStorage), m_ncaId(ncaId), m_offset(offset)
+// region NcaBodyWriter methods
+
+NcaBodyWriter::NcaBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage)
+: m_contentStorage(contentStorage), m_ncaId(ncaId), m_offset(offset)
 {
+     // Pre-allocate the memory to our buffer size to prevent reallocations/fragmentation
+     m_contentBuffer.reserve(CONTENT_BUFFER_SIZE);
 }
 
 NcaBodyWriter::~NcaBodyWriter()
 {
+     NcaBodyWriter::flushContentBuffer();
 }
 
 void NcaBodyWriter::write(const  u8* ptr, u64 sz)
 {
+     if (!sz) return; // no data
+
+     while (sz)
+     {
+          if (m_contentBuffer.size() < CONTENT_BUFFER_SIZE)
+          {
+               const u64 remainder = std::min(sz, CONTENT_BUFFER_SIZE - (u64)m_contentBuffer.size());
+               append(m_contentBuffer, ptr, remainder);
+               ptr += remainder;
+               sz -= remainder;
+          }
+
+          if (m_contentBuffer.size() < CONTENT_BUFFER_SIZE)
+          {
+               // assert sz == 0
+               return; // Need more data
+          }
+
+          // assert m_contentBuffer.size() == CONTENT_BUFFER_SIZE
+
+          flushContentBuffer();
+     }
+}
+
+void NcaBodyWriter::flushContentBuffer()
+{
+     if (m_contentBuffer.empty()) return; // No data
+
      if(isOpen())
      {
-          m_contentStorage->WritePlaceholder(*(NcmPlaceHolderId*)&m_ncaId, m_offset, (void*)ptr, sz);
-          m_offset += sz;
+          m_contentStorage->WritePlaceholder(*(NcmPlaceHolderId*)&m_ncaId, m_offset, m_contentBuffer.data(), m_contentBuffer.size());
+          m_offset += m_contentBuffer.size();
      }
+
+     m_contentBuffer.resize(0);
 }
 
 bool NcaBodyWriter::isOpen() const
@@ -60,6 +96,7 @@ bool NcaBodyWriter::isOpen() const
      return m_contentStorage != NULL;
 }
 
+// endregion
 
 class NczHeader
 {
@@ -177,24 +214,19 @@ public:
                processChunk(m_buffer.data(), m_buffer.size());
                m_buffer.clear(); // reclaim ok
           }
+          flushDeflateBuffer();
 
-          encrypt(m_deflateBuffer.data(), m_deflateBuffer.size(), m_offset);
-          flush();
+          // Ensure all data is flushed to storage
+          flushContentBuffer();
 
           return true;
      }
 
-     bool flush()
+     bool flushDeflateBuffer()
      {
-          if(!isOpen())
-          {
-               return false;
-          }
-
           if (m_deflateBuffer.size())
           {
-               m_contentStorage->WritePlaceholder(*(NcmPlaceHolderId*)&m_ncaId, m_offset, m_deflateBuffer.data(), m_deflateBuffer.size());
-               m_offset += m_deflateBuffer.size();
+               NcaBodyWriter::write(m_deflateBuffer.data(), m_deflateBuffer.size());
                m_deflateBuffer.resize(0);
           }
           return true;
@@ -275,6 +307,20 @@ public:
           return true;
      }
 
+     void flushContentBuffer() override
+     {
+          const u64 encryptOffset = m_offset;
+          const u64 encryptSize = m_contentBuffer.size();
+
+          if (encryptSize)
+          {
+               // Apply section-based encryption in-place before flushing
+               encrypt(m_contentBuffer.data(), encryptSize, encryptOffset);
+          }
+
+          NcaBodyWriter::flushContentBuffer();
+     }
+
      u64 processChunk(const u8* ptr, u64 sz)
      {
           while(sz > 0)
@@ -304,8 +350,7 @@ public:
 
                          if(m_deflateBuffer.size() >= 0x1000000)
                          {
-                              encrypt(m_deflateBuffer.data(), m_deflateBuffer.size(), m_offset);
-                              flush();
+                              flushDeflateBuffer();
                          }
 
                          p += writeChunkSz;

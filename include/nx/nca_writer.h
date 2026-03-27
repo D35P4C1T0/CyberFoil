@@ -25,18 +25,23 @@ SOFTWARE.
 #include <vector>
 #include "nx/ncm.hpp"
 #include <memory>
-#include "install/nca.hpp"
 
 class NcaBodyWriter
 {
 public:
+	static constexpr u64 CONTENT_BUFFER_SIZE = 0x800000; // 8MB
+
 	NcaBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage);
 	virtual ~NcaBodyWriter();
+
 	virtual void write(const  u8* ptr, u64 sz);
-	
+
+	virtual void flushContentBuffer();
+
 	bool isOpen() const;
 
 protected:
+	std::vector<u8> m_contentBuffer;
 	std::shared_ptr<nx::ncm::ContentStorage> m_contentStorage;
 	NcmContentId m_ncaId;
 
