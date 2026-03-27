@@ -1417,68 +1417,79 @@ namespace inst::ui {
         }
     }
 
-    void shopInstPage::openSearchSortDialog()
+    void shopInstPage::openSearchDialog()
     {
-        std::string details = "Current sort: ";
-        const bool allSection = this->isAllSection();
-        details += allSection ? this->getAllSortModeLabel() : this->getBrowseSortLabel();
-        if (!this->searchQuery.empty()) {
-            details += "\nSearch: ";
-            details += inst::util::shortenString(this->searchQuery, 48, true);
-        }
+        std::string query = inst::util::softwareKeyboard("inst.shop.search_hint"_lang, this->searchQuery, 60);
+        if (query == this->searchQuery)
+            return;
 
-        std::vector<std::string> options = {
-            "Search",
-            "Sort by Date",
-            "Sort by Name"
-        };
-        if (!allSection)
-            options.push_back("Use Shop Order");
-        if (!this->searchQuery.empty())
-            options.push_back("Clear Search");
+        this->searchQuery = query;
+        this->shopGridPage = -1;
+        this->gridPage = -1;
+        this->updateSectionText();
+        this->drawMenuItems(false);
+    }
+
+    void shopInstPage::openSortDialog()
+    {
+        const bool allSection = this->isAllSection();
+        std::string details = "Current sort: ";
+        details += allSection ? this->getAllSortModeLabel() : this->getBrowseSortLabel();
+        std::vector<std::string> options;
+        if (allSection) {
+            options = {
+                "Name A-Z",
+                "Name Z-A",
+                "Date Old-New",
+                "Date New-Old"
+            };
+        } else {
+            options = {
+                "Sort by Date",
+                "Sort by Name",
+                "Use Shop Order"
+            };
+        }
         options.push_back("common.cancel"_lang);
 
-        const int choice = mainApp->CreateShowDialog("Browse Shop", details, options, false);
+        const int choice = mainApp->CreateShowDialog("Sort Shop", details, options, false);
         if (choice < 0)
             return;
 
         bool needsRedraw = false;
-        if (choice == 0) {
-            std::string query = inst::util::softwareKeyboard("inst.shop.search_hint"_lang, this->searchQuery, 60);
-            if (query != this->searchQuery) {
-                this->searchQuery = query;
+        if (allSection) {
+            if (choice == 0 && this->allSortMode != 0) {
+                this->allSortMode = 0;
+                this->applyAllSectionSort();
+                needsRedraw = true;
+            } else if (choice == 1 && this->allSortMode != 1) {
+                this->allSortMode = 1;
+                this->applyAllSectionSort();
+                needsRedraw = true;
+            } else if (choice == 2 && this->allSortMode != 2) {
+                this->allSortMode = 2;
+                this->applyAllSectionSort();
+                needsRedraw = true;
+            } else if (choice == 3 && this->allSortMode != 3) {
+                this->allSortMode = 3;
+                this->applyAllSectionSort();
                 needsRedraw = true;
             }
-        } else if (choice == 1) {
-            if (allSection) {
-                if (this->allSortMode != 3) {
-                    this->allSortMode = 3;
-                    this->applyAllSectionSort();
-                    needsRedraw = true;
-                }
-            } else if (this->browseSortMode != BrowseSortMode::DateDesc) {
+        } else if (choice == 0) {
+            if (this->browseSortMode != BrowseSortMode::DateDesc) {
                 this->browseSortMode = BrowseSortMode::DateDesc;
                 needsRedraw = true;
             }
-        } else if (choice == 2) {
-            if (allSection) {
-                if (this->allSortMode != 0) {
-                    this->allSortMode = 0;
-                    this->applyAllSectionSort();
-                    needsRedraw = true;
-                }
-            } else if (this->browseSortMode != BrowseSortMode::NameAsc) {
+        } else if (choice == 1) {
+            if (this->browseSortMode != BrowseSortMode::NameAsc) {
                 this->browseSortMode = BrowseSortMode::NameAsc;
                 needsRedraw = true;
             }
-        } else if (!allSection && choice == 3) {
+        } else if (choice == 2) {
             if (this->browseSortMode != BrowseSortMode::Default) {
                 this->browseSortMode = BrowseSortMode::Default;
                 needsRedraw = true;
             }
-        } else if (!this->searchQuery.empty() && choice == (allSection ? 3 : 4)) {
-            this->searchQuery.clear();
-            needsRedraw = true;
         }
 
         if (!needsRedraw)
@@ -1815,13 +1826,12 @@ namespace inst::ui {
                 this->setButtonsText(" Download    / Select Version     Back");
         }
         else if (this->isSaveSyncSection())
-            this->setButtonsText(" Manage Save     Refresh    / Section     Search/Sort     Cancel");
+            this->setButtonsText(" Manage Save     Refresh    / Section     Search    \xEE\x83\x85 Sort     Cancel");
         else if (this->isInstalledSection())
-            this->setButtonsText("inst.shop.buttons_installed"_lang);
+            this->setButtonsText(" Details     Refresh    / Section     Search    \xEE\x83\x85 Sort     View     Cancel");
         else {
             std::string buttonsText = "inst.shop.buttons_all"_lang;
-            if (this->isAllSection())
-                buttonsText += "    \xEE\x83\x85 Sort";
+            buttonsText += "    \xEE\x83\x85 Sort";
             this->setButtonsText(buttonsText);
         }
     }
@@ -3894,32 +3904,10 @@ namespace inst::ui {
             return;
         }
         if (Down & HidNpadButton_StickR) {
-            if (this->isAllSection()) {
-                this->allSortMode = (this->allSortMode + 1) % 4;
-                this->applyAllSectionSort();
-                this->shopGridPage = -1;
-                this->gridPage = -1;
-                this->drawMenuItems(false);
-
-                if (!this->visibleItems.empty()) {
-                    if (this->shopGridMode) {
-                        this->shopGridIndex = 0;
-                        if (this->isInstalledSection())
-                            this->gridSelectedIndex = 0;
-                        else
-                            this->updateShopGrid();
-                    } else if (!this->menu->GetItems().empty()) {
-                        this->menu->SetSelectedIndex(0);
-                        this->updatePreview();
-                        this->updateListMarquee(true);
-                    }
-                }
-
-                this->updateSectionText();
-                this->updateButtonsText();
-                this->updateDescriptionPanel();
-                return;
-            }
+            this->openSortDialog();
+            this->updateButtonsText();
+            this->updateDescriptionPanel();
+            return;
         }
         if (Down & HidNpadButton_ZL) {
             this->showCurrentDescriptionDialog();
@@ -3996,7 +3984,7 @@ namespace inst::ui {
                 }
             }
             if (Down & HidNpadButton_ZR) {
-                this->openSearchSortDialog();
+                this->openSearchDialog();
             }
             u64 dirKeys = Down & (HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right);
             if (dirKeys == 0) {
@@ -4170,7 +4158,7 @@ namespace inst::ui {
             }
         }
         if (Down & HidNpadButton_ZR) {
-            this->openSearchSortDialog();
+            this->openSearchDialog();
         }
         if (Down & HidNpadButton_Y) {
             if (!this->isInstalledSection() && !this->isSaveSyncSection()) {

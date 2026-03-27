@@ -181,7 +181,8 @@ namespace inst::ui {
             std::string getAllSortModeLabel() const;
             const char* getBrowseSortLabel() const;
             void applyBrowseSort();
-            void openSearchSortDialog();
+            void openSearchDialog();
+            void openSortDialog();
             void drawMenuItems(bool clearItems);
             void refreshListSelectionIcons();
             void selectTitle(int selectedIndex);
