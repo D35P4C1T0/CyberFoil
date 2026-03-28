@@ -1144,7 +1144,7 @@ namespace inst::ui {
 
         this->imageLoadingText->SetText(
             "Fetching images " + std::to_string(completed) + "/" + std::to_string(total));
-        this->imageLoadingText->SetX(1280 - this->imageLoadingText->GetTextWidth() - 10);
+        this->imageLoadingText->SetX(10);
 
         if (completed < total) {
             this->imageLoadingText->SetVisible(true);
