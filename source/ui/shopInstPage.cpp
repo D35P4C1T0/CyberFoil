@@ -1973,8 +1973,66 @@ namespace inst::ui {
         return true;
     }
 
+    void shopInstPage::ensureSaveSyncSectionLoaded() {
+        if (!this->saveSyncEnabled || this->saveSyncLoaded)
+            return;
+        if (this->shopSections.empty())
+            return;
+        if (this->selectedSectionIndex < 0 || this->selectedSectionIndex >= static_cast<int>(this->shopSections.size()))
+            return;
+
+        const std::string id = this->shopSections[static_cast<std::size_t>(this->selectedSectionIndex)].id;
+        if (id != "saves" && id != "save")
+            return;
+
+        // Hide active list/grid visuals so the loading bar remains unobstructed.
+        this->menu->SetVisible(false);
+        this->previewImage->SetVisible(false);
+        this->gridHighlight->SetVisible(false);
+        this->gridTitleText->SetVisible(false);
+        this->imageLoadingText->SetVisible(false);
+        for (auto& img : this->gridImages)
+            img->SetVisible(false);
+        for (auto& highlight : this->shopGridSelectHighlights)
+            highlight->SetVisible(false);
+        for (auto& icon : this->shopGridSelectIcons)
+            icon->SetVisible(false);
+
+        const int previousSectionIndex = this->selectedSectionIndex;
+        this->setLoadingProgress(92, true);
+        mainApp->CallForRender();
+        this->buildSaveSyncSection(this->activeShopUrl);
+        this->saveSyncLoaded = true;
+
+        int saveSectionIndex = -1;
+        for (std::size_t i = 0; i < this->shopSections.size(); i++) {
+            const std::string& sectionId = this->shopSections[i].id;
+            if (sectionId == "saves" || sectionId == "save") {
+                saveSectionIndex = static_cast<int>(i);
+                break;
+            }
+        }
+
+        if (saveSectionIndex >= 0) {
+            this->selectedSectionIndex = saveSectionIndex;
+        } else if (this->shopSections.empty()) {
+            this->selectedSectionIndex = 0;
+        } else {
+            int clampedIndex = previousSectionIndex;
+            if (clampedIndex >= static_cast<int>(this->shopSections.size()))
+                clampedIndex = static_cast<int>(this->shopSections.size()) - 1;
+            if (clampedIndex < 0)
+                clampedIndex = 0;
+            this->selectedSectionIndex = clampedIndex;
+        }
+
+        this->setLoadingProgress(0, false);
+    }
+
     void shopInstPage::buildSaveSyncSection(const std::string& shopUrl) {
+        this->saveSyncLoaded = true;
         this->saveSyncEntries.clear();
+        std::unordered_map<std::uint64_t, std::string> saveIconUrlByTitleId;
 
         auto normalizeSectionId = [](std::string value) {
             std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -1983,12 +2041,27 @@ namespace inst::ui {
             return value;
         };
 
+        auto buildDefaultShopIconUrl = [&](std::uint64_t titleId) -> std::string {
+            if (titleId == 0 || shopUrl.empty())
+                return std::string();
+            std::string baseUrl = shopUrl;
+            while (!baseUrl.empty() && baseUrl.back() == '/')
+                baseUrl.pop_back();
+            char titleIdHex[17] = {};
+            std::snprintf(titleIdHex, sizeof(titleIdHex), "%016lX", titleId);
+            return baseUrl + "/api/shop/icon/" + std::string(titleIdHex);
+        };
+
         std::vector<shopInstStuff::ShopItem> remoteSaveItems;
         std::vector<shopInstStuff::ShopSection> retainedSections;
         retainedSections.reserve(this->shopSections.size());
         for (auto& section : this->shopSections) {
             const std::string id = normalizeSectionId(section.id);
             if (id == "saves" || id == "save" || id == "savegames" || id == "save_games" || id == "save-game") {
+                for (const auto& item : section.items) {
+                    if (item.hasTitleId && item.hasIconUrl && !item.iconUrl.empty())
+                        saveIconUrlByTitleId[item.titleId] = item.iconUrl;
+                }
                 remoteSaveItems.insert(remoteSaveItems.end(), section.items.begin(), section.items.end());
                 continue;
             }
@@ -2044,6 +2117,14 @@ namespace inst::ui {
                 item.size = entry.remoteSize;
             item.titleId = entry.titleId;
             item.hasTitleId = true;
+            const auto iconIt = saveIconUrlByTitleId.find(entry.titleId);
+            if (iconIt != saveIconUrlByTitleId.end()) {
+                item.iconUrl = iconIt->second;
+                item.hasIconUrl = true;
+            } else {
+                item.iconUrl = buildDefaultShopIconUrl(entry.titleId);
+                item.hasIconUrl = !item.iconUrl.empty();
+            }
             saveSection.items.push_back(std::move(item));
         }
 
@@ -3421,6 +3502,8 @@ namespace inst::ui {
         this->nativeUpdatesSectionPresent = false;
         this->nativeDlcSectionPresent = false;
         this->saveSyncEnabled = false;
+        this->saveSyncLoaded = false;
+        this->pendingMotdFetch = false;
         this->descriptionVisible = false;
         this->descriptionOverlayVisible = false;
         this->descriptionOverlayLines.clear();
@@ -3611,10 +3694,6 @@ namespace inst::ui {
             }
         }
 
-        std::string motd = shopInstStuff::FetchShopMotd(shopUrl, inst::config::shopUser, inst::config::shopPass);
-        if (!motd.empty())
-            mainApp->CreateShowDialog("inst.shop.motd_title"_lang, motd, {"common.ok"_lang}, true);
-
         this->ensureInstalledSectionPlaceholder();
         ShopDlcTrace("after ensureInstalledSectionPlaceholder sections=%llu", static_cast<unsigned long long>(this->shopSections.size()));
         this->buildLegacyOwnedSections();
@@ -3623,8 +3702,17 @@ namespace inst::ui {
         ShopDlcTrace("after cacheAvailableUpdates availableUpdates=%llu", static_cast<unsigned long long>(this->availableUpdates.size()));
         this->filterOwnedSections();
         this->applyAllSectionSort();
-        if (this->saveSyncEnabled)
-            this->buildSaveSyncSection(shopUrl);
+        if (this->saveSyncEnabled) {
+            const bool hasSaveSection = std::any_of(this->shopSections.begin(), this->shopSections.end(), [](const auto& section) {
+                return section.id == "saves" || section.id == "save";
+            });
+            if (!hasSaveSection) {
+                shopInstStuff::ShopSection saveSection;
+                saveSection.id = "saves";
+                saveSection.title = "Saves";
+                this->shopSections.push_back(std::move(saveSection));
+            }
+        }
         this->setLoadingProgress(100, true);
         mainApp->CallForRender();
 
@@ -3644,6 +3732,7 @@ namespace inst::ui {
         this->suppressBottomHints = false;
         this->updateSectionText();
         this->updateButtonsText();
+        this->ensureSaveSyncSectionLoaded();
         this->selectedItems.clear();
         this->drawMenuItems(false);
         this->infoImage->SetVisible(false);
@@ -3652,6 +3741,7 @@ namespace inst::ui {
             this->menu->SetVisible(true);
             this->updatePreview();
         }
+        this->pendingMotdFetch = true;
     }
 
     void shopInstPage::startInstall() {
@@ -3849,6 +3939,13 @@ namespace inst::ui {
         }
         if (this->handleSaveVersionSelectorInput(Down, Up, Held, Pos))
             return;
+        if (this->pendingMotdFetch && Down == 0 && Up == 0 && Held == 0 && Pos.IsEmpty()) {
+            this->pendingMotdFetch = false;
+            std::string motd = shopInstStuff::FetchShopMotd(this->activeShopUrl, inst::config::shopUser, inst::config::shopPass);
+            if (!motd.empty())
+                mainApp->CreateShowDialog("inst.shop.motd_title"_lang, motd, {"common.ok"_lang}, true);
+            return;
+        }
         if (Down & HidNpadButton_B) {
             this->updateRememberedSelection();
             mainApp->LoadLayout(mainApp->mainPage);
@@ -3965,6 +4062,7 @@ namespace inst::ui {
                     this->shopGridPage = -1;
                     this->gridSelectedIndex = 0;
                     this->gridPage = -1;
+                    this->ensureSaveSyncSectionLoaded();
                     this->updateSectionText();
                     this->updateButtonsText();
                     this->drawMenuItems(false);
@@ -3978,6 +4076,7 @@ namespace inst::ui {
                     this->shopGridPage = -1;
                     this->gridSelectedIndex = 0;
                     this->gridPage = -1;
+                    this->ensureSaveSyncSectionLoaded();
                     this->updateSectionText();
                     this->updateButtonsText();
                     this->drawMenuItems(false);
@@ -4139,6 +4238,7 @@ namespace inst::ui {
                 this->gridPage = -1;
                 this->shopGridIndex = 0;
                 this->shopGridPage = -1;
+                this->ensureSaveSyncSectionLoaded();
                 this->updateSectionText();
                 this->updateButtonsText();
                 this->drawMenuItems(false);
@@ -4152,6 +4252,7 @@ namespace inst::ui {
                 this->gridPage = -1;
                 this->shopGridIndex = 0;
                 this->shopGridPage = -1;
+                this->ensureSaveSyncSectionLoaded();
                 this->updateSectionText();
                 this->updateButtonsText();
                 this->drawMenuItems(false);

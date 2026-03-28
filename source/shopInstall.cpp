@@ -1257,6 +1257,19 @@ namespace shopInstStuff {
             return sections;
         }
 
+        if (allowCache) {
+            std::string cachedBody;
+            bool fresh = false;
+            if (LoadShopCache(baseUrl, cachedBody, fresh) && fresh) {
+                std::string cacheError;
+                sections = ParseShopSectionsBody(cachedBody, baseUrl, cacheError);
+                if (!sections.empty()) {
+                    error.clear();
+                    return sections;
+                }
+            }
+        }
+
         auto tryLegacyFallback = [&]() -> bool {
             std::string legacyError;
             std::vector<ShopItem> items = FetchShop(shopUrl, user, pass, legacyError, progressCb);

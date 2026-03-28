@@ -69,6 +69,8 @@ namespace inst::ui {
             bool nativeUpdatesSectionPresent = false;
             bool nativeDlcSectionPresent = false;
             bool saveSyncEnabled = false;
+            bool saveSyncLoaded = false;
+            bool pendingMotdFetch = false;
             bool suppressBottomHints = false;
             std::string activeShopUrl;
             BrowseSortMode browseSortMode = BrowseSortMode::Default;
@@ -205,6 +207,7 @@ namespace inst::ui {
             bool isAllSection() const;
             bool isInstalledSection() const;
             bool isSaveSyncSection() const;
+            void ensureSaveSyncSectionLoaded();
             void showInstalledDetails();
             void buildSaveSyncSection(const std::string& shopUrl);
             void refreshSaveSyncSection(std::uint64_t selectedTitleId, int previousSectionIndex);
