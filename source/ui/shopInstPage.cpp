@@ -3744,6 +3744,60 @@ namespace inst::ui {
         this->pendingMotdFetch = true;
     }
 
+    void shopInstPage::refreshAfterInstall() {
+        if (this->shopSections.empty() || this->activeShopUrl.empty()) {
+            this->startShop(true);
+            return;
+        }
+
+        mainApp->LoadLayout(mainApp->shopinstPage);
+
+        const bool wasGridMode = this->shopGridMode;
+        const int previousSectionIndex = this->selectedSectionIndex;
+        std::string previousSectionId;
+        if (previousSectionIndex >= 0 && previousSectionIndex < static_cast<int>(this->shopSections.size()))
+            previousSectionId = this->shopSections[static_cast<std::size_t>(previousSectionIndex)].id;
+
+        this->installedSnapshot = {};
+        this->ensureInstalledSectionPlaceholder();
+        (void)this->ensureInstalledSectionBuilt();
+        this->cacheAvailableUpdates();
+        this->filterOwnedSections();
+        this->applyAllSectionSort();
+
+        int nextSectionIndex = 0;
+        if (!previousSectionId.empty()) {
+            for (std::size_t i = 0; i < this->shopSections.size(); i++) {
+                if (this->shopSections[i].id == previousSectionId) {
+                    nextSectionIndex = static_cast<int>(i);
+                    break;
+                }
+            }
+        } else if (!this->shopSections.empty()) {
+            nextSectionIndex = std::clamp(previousSectionIndex, 0, static_cast<int>(this->shopSections.size()) - 1);
+        }
+
+        this->selectedSectionIndex = nextSectionIndex;
+        this->shopGridMode = wasGridMode;
+        this->shopGridIndex = 0;
+        this->shopGridPage = -1;
+        this->gridSelectedIndex = 0;
+        this->gridPage = -1;
+        this->selectedItems.clear();
+        this->previewKey.clear();
+        this->updateSectionText();
+        this->updateButtonsText();
+        this->drawMenuItems(false);
+        this->infoImage->SetVisible(false);
+        if (!this->shopGridMode) {
+            this->menu->SetSelectedIndex(0);
+            this->menu->SetVisible(true);
+            this->updatePreview();
+        }
+        this->updateDescriptionPanel();
+        mainApp->CallForRender();
+    }
+
     void shopInstPage::startInstall() {
         std::vector<shopInstStuff::ShopItem> autoAddedItems;
         if (!this->selectedItems.empty()) {
@@ -3906,7 +3960,7 @@ namespace inst::ui {
 
         this->updateRememberedSelection();
         shopInstStuff::installTitleShop(this->selectedItems, dialogResult, "inst.shop.source_string"_lang);
-        this->startShop(true);
+        this->refreshAfterInstall();
     }
 
     void shopInstPage::onInput(u64 Down, u64 Up, u64 Held, pu::ui::Touch Pos) {

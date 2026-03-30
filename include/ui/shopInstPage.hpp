@@ -223,6 +223,7 @@ namespace inst::ui {
             void scrollDescriptionOverlay(int delta);
             void refreshDescriptionOverlayBody();
             void updateDescriptionPanel();
+            void refreshAfterInstall();
             void resetIconDownloadState();
             void queueIconDownload(const shopInstStuff::ShopItem& item, const std::string& filePath);
             void refreshImageLoadingText(bool showCompleted = false);
