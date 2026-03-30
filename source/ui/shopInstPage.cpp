@@ -4139,7 +4139,8 @@ namespace inst::ui {
             if (Down & HidNpadButton_ZR) {
                 this->openSearchDialog();
             }
-            u64 dirKeys = Down & (HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right);
+            const u64 navDownMask = HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right;
+            u64 dirKeys = Down & navDownMask;
             if (dirKeys == 0) {
                 const bool dpadUp = (Held & HidNpadButton_Up) != 0;
                 const bool dpadDown = (Held & HidNpadButton_Down) != 0;
@@ -4167,10 +4168,12 @@ namespace inst::ui {
                         this->gridHoldDirY = dirY;
                         this->gridHoldStartTick = now;
                         this->gridHoldLastTick = now;
-                        if (dirY != 0)
-                            dirKeys |= (dirY > 0) ? HidNpadButton_Down : HidNpadButton_Up;
-                        else if (dirX != 0)
-                            dirKeys |= (dirX > 0) ? HidNpadButton_Right : HidNpadButton_Left;
+                        if (!dpadUp && !dpadDown && !dpadLeft && !dpadRight) {
+                            if (dirY != 0)
+                                dirKeys |= (dirY > 0) ? HidNpadButton_Down : HidNpadButton_Up;
+                            else if (dirX != 0)
+                                dirKeys |= (dirX > 0) ? HidNpadButton_Right : HidNpadButton_Left;
+                        }
                     } else {
                         const u64 freq = armGetSystemTickFreq();
                         const u64 delayTicks = (freq * 200) / 1000;
@@ -4205,7 +4208,6 @@ namespace inst::ui {
                 }
             }
             if (!this->visibleItems.empty()) {
-                const u64 navDownMask = HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right;
                 int newIndex = this->shopGridIndex;
                 if (dirKeys & HidNpadButton_Up)
                     newIndex -= kGridCols;
