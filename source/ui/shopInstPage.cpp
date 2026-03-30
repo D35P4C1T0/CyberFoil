@@ -4141,18 +4141,26 @@ namespace inst::ui {
             }
             u64 dirKeys = Down & (HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right);
             if (dirKeys == 0) {
+                const bool dpadUp = (Held & HidNpadButton_Up) != 0;
+                const bool dpadDown = (Held & HidNpadButton_Down) != 0;
+                const bool dpadLeft = (Held & HidNpadButton_Left) != 0;
+                const bool dpadRight = (Held & HidNpadButton_Right) != 0;
                 const bool stickUp = (Held & HidNpadButton_StickLUp) != 0;
                 const bool stickDown = (Held & HidNpadButton_StickLDown) != 0;
                 const bool stickLeft = (Held & HidNpadButton_StickLLeft) != 0;
                 const bool stickRight = (Held & HidNpadButton_StickLRight) != 0;
-                if (!stickUp && !stickDown && !stickLeft && !stickRight) {
+                const bool heldUp = dpadUp || stickUp;
+                const bool heldDown = dpadDown || stickDown;
+                const bool heldLeft = dpadLeft || stickLeft;
+                const bool heldRight = dpadRight || stickRight;
+                if (!heldUp && !heldDown && !heldLeft && !heldRight) {
                     this->gridHoldDirX = 0;
                     this->gridHoldDirY = 0;
                     this->gridHoldStartTick = 0;
                     this->gridHoldLastTick = 0;
                 } else {
-                    int dirX = stickRight ? 1 : (stickLeft ? -1 : 0);
-                    int dirY = stickDown ? 1 : (stickUp ? -1 : 0);
+                    int dirX = heldRight ? 1 : (heldLeft ? -1 : 0);
+                    int dirY = heldDown ? 1 : (heldUp ? -1 : 0);
                     u64 now = armGetSystemTick();
                     if (this->gridHoldDirX != dirX || this->gridHoldDirY != dirY || this->gridHoldStartTick == 0) {
                         this->gridHoldDirX = dirX;
@@ -4197,6 +4205,7 @@ namespace inst::ui {
                 }
             }
             if (!this->visibleItems.empty()) {
+                const u64 navDownMask = HidNpadButton_Up | HidNpadButton_Down | HidNpadButton_Left | HidNpadButton_Right;
                 int newIndex = this->shopGridIndex;
                 if (dirKeys & HidNpadButton_Up)
                     newIndex -= kGridCols;
@@ -4213,7 +4222,10 @@ namespace inst::ui {
                     newIndex = (int)this->visibleItems.size() - 1;
 
                 if (newIndex != this->shopGridIndex) {
+                    const bool repeatedMove = ((dirKeys & navDownMask) != 0) && ((Down & navDownMask) == 0);
                     this->shopGridIndex = newIndex;
+                    if (repeatedMove)
+                        inst::util::playNavigationClick();
                     if (this->isInstalledSection()) {
                         this->gridSelectedIndex = this->shopGridIndex;
                         this->updateInstalledGrid();
@@ -4375,13 +4387,20 @@ namespace inst::ui {
                     if (now - this->holdStartTick >= delayTicks && now - this->lastHoldTick >= repeatTicks) {
                         int currentIndex = this->menu->GetSelectedIndex();
                         int maxIndex = static_cast<int>(this->menu->GetItems().size()) - 1;
+                        bool moved = false;
                         if (direction > 0) {
-                            if (currentIndex < maxIndex)
+                            if (currentIndex < maxIndex) {
                                 this->menu->OnInput(HidNpadButton_AnyDown, 0, 0, pu::ui::Touch::Empty);
+                                moved = true;
+                            }
                         } else {
-                            if (currentIndex > 0)
+                            if (currentIndex > 0) {
                                 this->menu->OnInput(HidNpadButton_AnyUp, 0, 0, pu::ui::Touch::Empty);
+                                moved = true;
+                            }
                         }
+                        if (moved)
+                            inst::util::playNavigationClick();
                         this->lastHoldTick = now;
                     }
                 }
