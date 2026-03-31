@@ -42,18 +42,15 @@ static bool isLikelyImageFile(const char *path) {
     return false;
 }
 
-static bool hasVisibleChars(const std::string& value) {
-    for (unsigned char c : value) {
-        if (!std::isspace(c))
-            return true;
-    }
-    return false;
-}
-
 namespace inst::curl {
     const std::string& getDefaultUserAgent() {
         static const std::string kDefaultUserAgent = "cyberfoil";
         return kDefaultUserAgent;
+    }
+
+    const std::string& getEmptyUserAgent() {
+        static const std::string kEmptyUserAgent;
+        return kEmptyUserAgent;
     }
 
     const std::string& getDownloadUserAgent() {
@@ -69,9 +66,11 @@ namespace inst::curl {
             return kChromeUserAgent;
         if (mode == "safari")
             return kSafariUserAgent;
+        if (mode == "tinfoil")
+            return getEmptyUserAgent();
         if (mode == "firefox")
             return kFirefoxUserAgent;
-        if (mode == "custom" && hasVisibleChars(inst::config::httpUserAgent))
+        if (mode == "custom")
             return inst::config::httpUserAgent;
         return getDefaultUserAgent();
     }
