@@ -191,6 +191,8 @@ namespace inst::ui {
                 return "Chrome (Windows)";
             if (normalized == "safari")
                 return "Safari (iPhone)";
+            if (normalized == "tinfoil")
+                return "Tinfoil";
             if (normalized == "firefox")
                 return "Firefox (Windows)";
             if (normalized == "custom")
@@ -201,26 +203,30 @@ namespace inst::ui {
         int GetUserAgentProfileChoiceIndex(const std::string& mode)
         {
             const std::string normalized = inst::config::NormalizeHttpUserAgentMode(mode);
-            if (normalized == "chrome")
+            if (normalized == "tinfoil")
                 return 1;
-            if (normalized == "safari")
+            if (normalized == "chrome")
                 return 2;
-            if (normalized == "firefox")
+            if (normalized == "safari")
                 return 3;
-            if (normalized == "custom")
+            if (normalized == "firefox")
                 return 4;
+            if (normalized == "custom")
+                return 5;
             return 0;
         }
 
         std::string GetUserAgentProfileModeFromChoice(int choice)
         {
             if (choice == 1)
-                return "chrome";
+                return "tinfoil";
             if (choice == 2)
-                return "safari";
+                return "chrome";
             if (choice == 3)
-                return "firefox";
+                return "safari";
             if (choice == 4)
+                return "firefox";
+            if (choice == 5)
                 return "custom";
             return "default";
         }
@@ -978,6 +984,7 @@ namespace inst::ui {
                 case 25: {
                     const std::vector<std::string> profiles = {
                         "Default (CyberFoil)",
+                        "Tinfoil",
                         "Chrome (Windows)",
                         "Safari (iPhone)",
                         "Firefox (Windows)",
@@ -997,7 +1004,9 @@ namespace inst::ui {
                         break;
 
                     std::string mode = GetUserAgentProfileModeFromChoice(profileChoice);
-                    if (mode == "custom") {
+                    if (mode == "tinfoil") {
+                        inst::config::httpUserAgent.clear();
+                    } else if (mode == "custom") {
                         std::string customUserAgent = TrimString(inst::util::softwareKeyboard("Enter custom User-Agent", inst::config::httpUserAgent, 300));
                         if (customUserAgent.empty()) {
                             inst::ui::mainApp->CreateShowDialog("Invalid User-Agent", "Custom User-Agent cannot be empty.", {"common.ok"_lang}, true);
