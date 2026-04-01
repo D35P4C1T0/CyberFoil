@@ -13,4 +13,5 @@ scripts
 *.key
 *.pub
 *.ps1
+*.log
 
