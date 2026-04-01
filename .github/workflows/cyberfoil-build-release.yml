@@ -35,8 +35,10 @@ jobs:
             MAKE_ARGS+=("HAUTH_SEED_OBF_HEX=$HAUTH_SEED_OBF_HEX")
           fi
           if [ -n "${SHOP_ENC:-}" ]; then
-            EMBEDDED_SHOP_KEY_OBF_HEX="$(python3 -c 'import os; s=os.environ.get("SHOP_ENC", "").encode("utf-8"); print("".join(f"{(b ^ ((0x5A + ((i * 29) % 199)) & 0xFF)):02x}" for i, b in enumerate(s)))')"
+            EMBEDDED_SHOP_KEY_OBF_KEY_HEX="$(openssl rand -hex 16)"
+            EMBEDDED_SHOP_KEY_OBF_HEX="$(printf '%s' "$SHOP_ENC" | openssl enc -aes-128-ecb -K "$EMBEDDED_SHOP_KEY_OBF_KEY_HEX" -nosalt | xxd -p -c 100000 | tr -d '\n')"
             MAKE_ARGS+=("EMBEDDED_SHOP_KEY_OBF_HEX=$EMBEDDED_SHOP_KEY_OBF_HEX")
+            MAKE_ARGS+=("EMBEDDED_SHOP_KEY_OBF_KEY_HEX=$EMBEDDED_SHOP_KEY_OBF_KEY_HEX")
           fi
           make "${MAKE_ARGS[@]}"
 
