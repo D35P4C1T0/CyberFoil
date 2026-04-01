@@ -31,6 +31,8 @@ SOFTWARE.
 #include "install/nca.hpp"
 #include <limits>
 
+// region Utility Functions, Classes, Structs
+
 void append(std::vector<u8>& buffer, const u8* ptr, u64 sz)
 {
      u64 offset = buffer.size();
@@ -62,6 +64,22 @@ public:
 
      Crypto::Aes128Ctr crypto; // Counter (Ctr) mode, for streaming
 };
+
+// Custom deleter for malloc'd memory
+struct MallocDeleter {
+     void operator()(void* ptr) const {
+          if (ptr) free(ptr);
+     }
+};
+
+// Custom deleter for ZSTD_DCtx
+struct ZstdDCtxDeleter {
+     void operator()(ZSTD_DCtx* ctx) const {
+          if (ctx) ZSTD_freeDCtx(ctx);
+     }
+};
+
+// endregion
 
 // region Header Structs
 
@@ -112,7 +130,7 @@ protected:
 
 // endregion
 
-// region NcaBodyWriter methods
+// region NcaBodyWriter Methods
 
 NcaBodyWriter::NcaBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage)
 : m_contentStorage(contentStorage), m_ncaId(ncaId), m_offset(offset)
@@ -143,9 +161,20 @@ void NcaBodyWriter::close()
      CloseableWriter::close(); // Mark as closed after all cleanups are done
 }
 
+// Create write() callback for delegates
+std::function<WriterFn> NcaBodyWriter::getDirectWriterFn()
+{
+     auto self = shared_from_this(); // shared_ptr<NcaBodyWriter>
+     return [self](const u8* data, u64 size)
+     {
+          self->NcaBodyWriter::write(data, size);
+     };
+}
+
 void NcaBodyWriter::write(const  u8* ptr, u64 sz)
 {
-     if (isClosed()) {
+     if (isClosed())
+     {
           LOG_DEBUG("write() called on closed NcaBodyWriter");
           return;
      }
@@ -176,7 +205,8 @@ void NcaBodyWriter::write(const  u8* ptr, u64 sz)
 
 void NcaBodyWriter::flushContentBuffer()
 {
-     if (isClosed()) {
+     if (isClosed())
+     {
           LOG_DEBUG("flushContentBuffer() called on closed NcaBodyWriter");
           return;
      }
@@ -194,17 +224,136 @@ void NcaBodyWriter::flushContentBuffer()
 
 // endregion
 
+// region NCZ Writer Delegates
+
+// Pass-through Stream Writer - Handles streaming uncompressed / unknown data
+class DirectStreamWriter : public CloseableWriter
+{
+public:
+     explicit DirectStreamWriter(const std::function<WriterFn>& writeFn) : m_writeFn(writeFn)
+     {
+          if (!writeFn)
+               THROW_FORMAT("DirectStreamWriter: WriterFn callback cannot be null");
+     }
+     ~DirectStreamWriter() override
+     {
+          DirectStreamWriter::close();
+     }
+
+     void write(const u8* data, u64 sz) override
+     {
+          if (isClosed())
+          {
+               LOG_DEBUG("write() called on closed DirectStreamWriter");
+               return;
+          }
+
+          if (!sz) return; // no data
+
+          m_writeFn(data, sz);
+     }
+
+     void close() override
+     {
+          if (isClosed()) return; // Idempotent close
+
+          // Free resources
+          m_writeFn = NULL;
+
+          CloseableWriter::close();  // Mark as closed after all cleanups are done
+     }
+
+private:
+     std::function<WriterFn> m_writeFn;
+};
+
+// ZSTD Stream Writer - handles streaming ZSTD compression
+class ZstdStreamWriter : public CloseableWriter
+{
+public:
+     static const u32 ZSTD_MAGIC = 0xFD2FB528u; // ZSTD frame magic number - 0x28B52FFD
+
+     ZstdStreamWriter(const std::function<WriterFn>& writeFn)
+          : m_writeFn(writeFn),
+            m_buffInSize(ZSTD_DStreamInSize()),
+            m_buffOutSize(ZSTD_DStreamOutSize()),
+            m_buffOut(static_cast<u8*>(malloc(ZSTD_DStreamOutSize())), MallocDeleter()),
+            m_dctx(ZSTD_createDCtx(), ZstdDCtxDeleter())
+     {
+          if (!writeFn)
+               THROW_FORMAT("ZstdStreamWriter: WriterFn callback cannot be null");
+          if (!m_buffOut || !m_dctx)
+               THROW_FORMAT("ZstdStreamWriter: failed to allocate resources");
+     }
+
+     ~ZstdStreamWriter() override
+     {
+          ZstdStreamWriter::close();
+     }
+
+     void close() override
+     {
+          if (isClosed()) return; // Idempotent close
+
+          // Free resources
+          m_dctx.reset();    // Calls ZSTD_freeDCtx()
+          m_buffOut.reset(); // Calls free()
+          m_writeFn = NULL;
+
+          CloseableWriter::close(); // Mark as closed after all cleanups are done
+     }
+
+     void write(const u8* ptr, u64 sz) override
+     {
+          if (isClosed())
+          {
+               LOG_DEBUG("write() called on closed ZstdStreamWriter");
+               return;
+          }
+
+          while (sz > 0)
+          {
+               const size_t readChunkSz = std::min(sz, m_buffInSize);
+               ZSTD_inBuffer input = { ptr, readChunkSz, 0 };
+
+               while (input.pos < input.size)
+               {
+                    ZSTD_outBuffer output = { m_buffOut.get(), m_buffOutSize, 0 };
+                    size_t const ret = ZSTD_decompressStream(m_dctx.get(), &output, &input);
+
+                    if (ZSTD_isError(ret))
+                    {
+                         const char* errorName = ZSTD_getErrorName(ret);
+                         THROW_FORMAT("ZstdStreamWriter: decompress error: %s", errorName);
+                    }
+
+                    // Write decompressed data to callback writer immediately
+                    if (output.pos > 0)
+                    {
+                         m_writeFn(m_buffOut.get(), output.pos);
+                    }
+               }
+
+               sz -= readChunkSz;
+               ptr += readChunkSz;
+          }
+     }
+
+private:
+     std::function<WriterFn> m_writeFn;
+     size_t m_buffInSize;
+     size_t m_buffOutSize;
+     std::unique_ptr<u8, MallocDeleter> m_buffOut;
+     std::unique_ptr<ZSTD_DCtx, ZstdDCtxDeleter> m_dctx;
+};
+
+// endregion
+
 class NczBodyWriter : public NcaBodyWriter
 {
 public:
-     static const u64 NCZ_BODY_CHUNK_SIZE = 0x1000000; // 16MB
-
      NczBodyWriter(const NcmContentId& ncaId, u64 offset, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage) : NcaBodyWriter(ncaId, offset, contentStorage)
      {
-          buffIn = malloc(buffInSize);
-          buffOut = malloc(buffOutSize);
-
-          dctx = ZSTD_createDCtx();
      }
 
      ~NczBodyWriter() override
@@ -218,23 +367,15 @@ protected:
      {
           // Free resources
           currentSectionCipher.reset(); // unique_ptr handles delete
-          currentSectionIdx = (u64)-1;
           sections.clear(); // reclaim ok
-
-          if (dctx)
-          {
-               ZSTD_freeDCtx(dctx);
-               dctx = NULL;
-          }
+          m_writer = NULL;
      }
 
      void doBeforeClose() override
      {
-          // Handle dangling buffer < NCZ_BODY_CHUNK_SIZE
-          if (this->m_buffer.size())
+          if (m_writer)
           {
-               processChunk(m_buffer.data(), m_buffer.size());
-               m_buffer.clear(); // reclaim ok
+               m_writer->close(); // Flush remaining data to writerFn
           }
      }
 
@@ -271,7 +412,7 @@ private:
           return nextSectionIdx;
      }
 
-     bool encrypt(const u8* ptr, u64 sz, u64 offset)
+     bool encrypt(u8* ptr, u64 sz, u64 offset)
      {
           while (sz)
           {
@@ -303,7 +444,7 @@ private:
 
                     if (currentSectionCipher)
                     {
-                         currentSectionCipher->encrypt((void*)ptr, chunk, offset);
+                         currentSectionCipher->encrypt(ptr, chunk, offset);
                     }
                }
                else
@@ -338,7 +479,8 @@ protected:
 
      void flushContentBuffer() override
      {
-          if (isClosed()) {
+          if (isClosed())
+          {
                LOG_DEBUG("flushContentBuffer() called on closed NczBodyWriter");
                return;
           }
@@ -355,48 +497,19 @@ protected:
           NcaBodyWriter::flushContentBuffer();
      }
 
-     u64 processChunk(const u8* ptr, u64 sz)
-     {
-          while(sz > 0)
-          {
-               const size_t readChunkSz = std::min(sz, buffInSize);
-               ZSTD_inBuffer input = { ptr, readChunkSz, 0 };
-
-               while(input.pos < input.size)
-               {
-                    ZSTD_outBuffer output = { buffOut, buffOutSize, 0 };
-                    size_t const ret = ZSTD_decompressStream(dctx, &output, &input);
-
-                    if (ZSTD_isError(ret))
-                    {
-                         LOG_DEBUG("%s\n", ZSTD_getErrorName(ret));
-                         return 0;
-                    }
-
-                    if (output.pos > 0)
-                    {
-                         NcaBodyWriter::write((u8*)buffOut, output.pos);
-                    }
-               }
-
-               sz -= readChunkSz;
-               ptr += readChunkSz;
-          }
-
-          return 1;
-     }
-
 public:
 
      void write(const  u8* ptr, u64 sz) override
      {
-          if (isClosed()) {
+          if (isClosed())
+          {
                LOG_DEBUG("write() called on closed NczBodyWriter");
                return;
           }
 
           if (!sz) return; // no data
 
+          // Phase 1: Parse NCZSECTN header
           if (!m_sectionsInitialized)
           {
                // Need to buffer enough to get the section count
@@ -455,33 +568,57 @@ public:
                m_buffer.resize(0);
           }
 
-          while (sz)
+          // Phase 2: Detect body compression format
+          if (!m_writer)
           {
-               // Need to buffer each chunk before processing
-               if (m_buffer.size() < NCZ_BODY_CHUNK_SIZE)
+               // Need to buffer enough to identify magic
+               const u64 header_size = sizeof(ZstdStreamWriter::ZSTD_MAGIC);
+
+               if (m_buffer.size() < header_size)
                {
-                    const u64 remainder = std::min(sz, NCZ_BODY_CHUNK_SIZE - m_buffer.size());
+                    const u64 remainder = std::min(sz, header_size - m_buffer.size());
                     append(m_buffer, ptr, remainder);
                     ptr += remainder;
                     sz -= remainder;
                }
 
-               if (m_buffer.size() == NCZ_BODY_CHUNK_SIZE)
+               if (m_buffer.size() < header_size)
                {
-                    processChunk(m_buffer.data(), m_buffer.size());
-                    m_buffer.resize(0);
+                    // assert sz == 0
+                    return;
                }
+
+               // assert m_buffer.size() == header_size
+
+               // Now we can check for magic
+               u32 magic32 = *(u32*)m_buffer.data();
+
+               if (magic32 == ZstdStreamWriter::ZSTD_MAGIC)
+               {
+                    m_writer = std::make_unique<ZstdStreamWriter>(getDirectWriterFn());
+               }
+               else
+               {
+                    LOG_DEBUG("Unknown NCZ Body Content - Using Direct Writer");
+                    m_writer = std::make_unique<DirectStreamWriter>(getDirectWriterFn());
+               }
+
+               // Flush buffer now because
+               // future writes will go directly to m_writer
+               m_writer->write(m_buffer.data(), m_buffer.size());
+               m_buffer.clear(); // reclaim ok
+          }
+
+          // Phase 3: Forward all data to body processor
+          // We'll encrypt processed data later in flushContentBuffer
+          if (sz > 0)
+          {
+               m_writer->write(ptr, sz);
           }
      }
 
 private:
-     size_t const buffInSize = ZSTD_DStreamInSize();
-     size_t const buffOutSize = ZSTD_DStreamOutSize();
-
-     void* buffIn = NULL;
-     void* buffOut = NULL;
-
-     ZSTD_DCtx* dctx = NULL;
+     std::unique_ptr<CloseableWriter> m_writer;
 
      std::vector<u8> m_buffer;
 
@@ -491,6 +628,8 @@ private:
      std::unique_ptr<Aes128CtrCipher> currentSectionCipher; // Crypto cipher for current section
      u64 currentSectionIdx = (u64)-1; // Track which section the cipher is for
 };
+
+// region NcaWriter Methods
 
 NcaWriter::NcaWriter(const NcmContentId& ncaId, std::shared_ptr<nx::ncm::ContentStorage>& contentStorage) : m_ncaId(ncaId), m_contentStorage(contentStorage), m_writer(NULL)
 {
@@ -514,7 +653,7 @@ void NcaWriter::close()
      {
           if (m_contentStorage)
           {
-              flushHeader();
+               flushHeader();
           }
 
           m_buffer.clear(); // reclaim ok
@@ -526,7 +665,8 @@ void NcaWriter::close()
 
 void NcaWriter::write(const  u8* ptr, u64 sz)
 {
-     if (isClosed()) {
+     if (isClosed())
+     {
           LOG_DEBUG("write() called on closed NcaWriter");
           return;
      }
@@ -576,7 +716,8 @@ void NcaWriter::write(const  u8* ptr, u64 sz)
                sz -= remainder;
           }
 
-          if (m_buffer.size() < header_size) {
+          if (m_buffer.size() < header_size)
+          {
                // assert sz == 0
                return;
           }
@@ -613,7 +754,8 @@ void NcaWriter::write(const  u8* ptr, u64 sz)
 
 void NcaWriter::flushHeader()
 {
-     if (isClosed()) {
+     if (isClosed())
+     {
           LOG_DEBUG("flushHeader() called on closed NcaWriter");
           return;
      }
@@ -654,3 +796,5 @@ void NcaWriter::flushHeader()
           m_contentStorage->WritePlaceholder(*(NcmPlaceHolderId*)&m_ncaId, 0, m_buffer.data(), m_buffer.size());
      }
 }
+
+// endregion

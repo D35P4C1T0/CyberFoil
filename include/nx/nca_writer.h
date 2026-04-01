@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #pragma once
+#include <functional>
 #include <switch.h>
 #include <vector>
 #include "nx/ncm.hpp"
@@ -44,7 +45,10 @@ private:
 	bool m_isClosed = false;
 };
 
-class NcaBodyWriter : public CloseableWriter
+// Simple call-back Writer with no life-cycle methods
+using WriterFn = void(const u8* data, u64 size);
+
+class NcaBodyWriter : public CloseableWriter, public std::enable_shared_from_this<NcaBodyWriter>
 {
 public:
 	static constexpr u64 CONTENT_BUFFER_SIZE = 0x800000; // 8MB
@@ -56,6 +60,12 @@ public:
 
 	// Final - Subsclasses should override doBeforeClose() + doClose()
 	void close() final;
+
+	// Returns a Writer adapter that bypasses virtual dispatch and calls
+	// NcaBodyWriter::write() directly, even when called on derived classes.
+	// LIFETIME: Returned fn holds a shared_ptr to `this`.
+	//           As such, NcaBodyWriter must be managed by a shared_ptr at call time.
+	std::function<WriterFn> getDirectWriterFn();
 
 protected:
 
@@ -92,6 +102,6 @@ protected:
 	NcmContentId m_ncaId;
 	std::shared_ptr<nx::ncm::ContentStorage> m_contentStorage;
 	std::vector<u8> m_buffer;
-	std::shared_ptr<NcaBodyWriter> m_writer;
+	std::shared_ptr<NcaBodyWriter> m_writer; // Must be shared_ptr for getDirectWriterFn to work
 	bool m_headerFlushed = false;
 };
