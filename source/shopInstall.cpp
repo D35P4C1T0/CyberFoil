@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <map>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
@@ -207,7 +208,195 @@ namespace {
         return baseUrl + "/" + urlPath;
     }
 
+    std::string TrimAscii(const std::string& value);
+    void ApplyLegacyMetadataFromName(const std::string& name, shopInstStuff::ShopItem& item);
+    void ApplyOfflineDataToItem(shopInstStuff::ShopItem& item, bool hasExplicitName);
     std::uint64_t GetOfflineLookupTitleId(const shopInstStuff::ShopItem& item);
+
+    std::string BuildOriginUrl(const std::string& url)
+    {
+        const std::size_t schemePos = url.find("://");
+        if (schemePos == std::string::npos)
+            return url;
+        const std::size_t pathPos = url.find('/', schemePos + 3);
+        if (pathPos == std::string::npos)
+            return url;
+        return url.substr(0, pathPos);
+    }
+
+    std::string BuildUrlScheme(const std::string& url)
+    {
+        const std::size_t schemePos = url.find("://");
+        if (schemePos == std::string::npos)
+            return "http";
+        return url.substr(0, schemePos);
+    }
+
+    bool LooksLikeBareHostPath(const std::string& value)
+    {
+        if (value.empty() || value[0] == '/' || value[0] == '.')
+            return false;
+        const std::size_t slashPos = value.find('/');
+        if (slashPos == std::string::npos)
+            return false;
+
+        const std::string hostPart = value.substr(0, slashPos);
+        if (hostPart.empty())
+            return false;
+        if (hostPart == "localhost")
+            return true;
+        return hostPart.find('.') != std::string::npos || hostPart.find(':') != std::string::npos;
+    }
+
+    std::string ResolvePhpinfoilLegacyUrl(const std::string& baseUrl, const std::string& urlPath)
+    {
+        if (urlPath.rfind("http://", 0) == 0 || urlPath.rfind("https://", 0) == 0)
+            return urlPath;
+        if (urlPath.size() >= 5) {
+            std::string prefix = urlPath.substr(0, 5);
+            std::transform(prefix.begin(), prefix.end(), prefix.begin(), [](unsigned char c) { return std::tolower(c); });
+            if (prefix == "jbod:")
+                return urlPath;
+        }
+
+        const std::string origin = BuildOriginUrl(baseUrl);
+        if (urlPath.rfind("//", 0) == 0)
+            return BuildUrlScheme(origin) + ":" + urlPath;
+        if (!urlPath.empty() && urlPath[0] == '/')
+            return origin + urlPath;
+        if (LooksLikeBareHostPath(urlPath))
+            return BuildUrlScheme(origin) + "://" + urlPath;
+        return origin + "/" + urlPath;
+    }
+
+    std::string ResolveLegacyFileUrl(const std::string& baseUrl, const std::string& urlPath)
+    {
+        if (inst::config::shopPhpinfoilRelativeUrls)
+            return ResolvePhpinfoilLegacyUrl(baseUrl, urlPath);
+        return BuildFullUrl(baseUrl, urlPath);
+    }
+
+    bool TryReadJsonU64(const nlohmann::json& value, std::uint64_t& out)
+    {
+        if (value.is_number_unsigned()) {
+            out = value.get<std::uint64_t>();
+            return true;
+        }
+        if (value.is_number_integer()) {
+            const auto parsed = value.get<long long>();
+            out = parsed > 0 ? static_cast<std::uint64_t>(parsed) : 0;
+            return parsed >= 0;
+        }
+        if (value.is_string()) {
+            const std::string text = TrimAscii(value.get<std::string>());
+            if (text.empty())
+                return false;
+            char* end = nullptr;
+            const auto parsed = std::strtoull(text.c_str(), &end, 10);
+            if (end == text.c_str() || (end != nullptr && *end != '\0'))
+                return false;
+            out = static_cast<std::uint64_t>(parsed);
+            return true;
+        }
+        return false;
+    }
+
+    bool IsInstallableLegacyHref(const std::string& href)
+    {
+        std::string path = href;
+        const auto hashPos = path.find('#');
+        if (hashPos != std::string::npos)
+            path = path.substr(0, hashPos);
+        const auto queryPos = path.find('?');
+        if (queryPos != std::string::npos)
+            path = path.substr(0, queryPos);
+        std::string ext = std::filesystem::path(path).extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return std::tolower(c); });
+        return ext == ".nsp" || ext == ".nsz" || ext == ".xci" || ext == ".xcz";
+    }
+
+    std::string DecodeHtmlEntities(std::string value)
+    {
+        static const std::map<std::string, std::string> replacements = {
+            {"&amp;", "&"},
+            {"&quot;", "\""},
+            {"&#39;", "'"},
+            {"&#039;", "'"},
+            {"&lt;", "<"},
+            {"&gt;", ">"}
+        };
+
+        for (const auto& entry : replacements) {
+            std::size_t pos = 0;
+            while ((pos = value.find(entry.first, pos)) != std::string::npos) {
+                value.replace(pos, entry.first.size(), entry.second);
+                pos += entry.second.size();
+            }
+        }
+        return value;
+    }
+
+    bool TryParsePhpinfoilHtmlBody(const std::string& body, const std::string& baseUrl, std::vector<shopInstStuff::ShopItem>& outItems)
+    {
+        std::size_t pos = 0;
+        while (true) {
+            const std::size_t anchorPos = body.find("<a", pos);
+            if (anchorPos == std::string::npos)
+                break;
+
+            const std::size_t hrefPos = body.find("href=", anchorPos);
+            if (hrefPos == std::string::npos) {
+                pos = anchorPos + 2;
+                continue;
+            }
+
+            const std::size_t valuePos = hrefPos + 5;
+            if (valuePos >= body.size()) {
+                pos = hrefPos + 5;
+                continue;
+            }
+
+            const char quote = body[valuePos];
+            if (quote != '"' && quote != '\'') {
+                pos = valuePos + 1;
+                continue;
+            }
+
+            const std::size_t hrefStart = valuePos + 1;
+            const std::size_t hrefEnd = body.find(quote, hrefStart);
+            if (hrefEnd == std::string::npos) {
+                pos = hrefStart;
+                continue;
+            }
+
+            const std::size_t textStart = body.find('>', hrefEnd);
+            const std::size_t textEnd = textStart == std::string::npos ? std::string::npos : body.find("</a>", textStart);
+            pos = (textEnd == std::string::npos) ? hrefEnd + 1 : textEnd + 4;
+            if (textStart == std::string::npos || textEnd == std::string::npos)
+                continue;
+
+            const std::string href = DecodeHtmlEntities(body.substr(hrefStart, hrefEnd - hrefStart));
+            if (!IsInstallableLegacyHref(href))
+                continue;
+
+            shopInstStuff::ShopItem item;
+            item.url = ResolveLegacyFileUrl(baseUrl, href);
+            item.name = DecodeHtmlEntities(body.substr(textStart + 1, textEnd - textStart - 1));
+            if (item.name.empty())
+                item.name = inst::util::formatUrlString(item.url);
+            ApplyLegacyMetadataFromName(item.name, item);
+            ApplyOfflineDataToItem(item, !item.name.empty());
+            outItems.push_back(item);
+        }
+
+        if (outItems.empty())
+            return false;
+
+        std::sort(outItems.begin(), outItems.end(), [](const shopInstStuff::ShopItem& a, const shopInstStuff::ShopItem& b) {
+            return inst::util::ignoreCaseCompare(a.name, b.name);
+        });
+        return true;
+    }
 
     std::string GetShopIconCachePath(const shopInstStuff::ShopItem& item)
     {
@@ -1070,6 +1259,11 @@ namespace shopInstStuff {
         }
 
         FetchResult fetch = FetchShopResponse(baseUrl, user, pass, progressCb);
+        if (inst::config::shopPhpinfoilHtmlMode &&
+            ((!fetch.contentType.empty() && fetch.contentType.find("text/html") != std::string::npos) || ContainsHtml(fetch.body))) {
+            if (TryParsePhpinfoilHtmlBody(fetch.body, baseUrl, items))
+                return items;
+        }
         if (!ValidateShopResponse(fetch, error))
             return items;
 
@@ -1089,9 +1283,8 @@ namespace shopInstStuff {
                     continue;
                 std::string url = entry["url"].get<std::string>();
                 std::uint64_t size = 0;
-                if (entry.contains("size") && entry["size"].is_number()) {
-                    size = entry["size"].get<std::uint64_t>();
-                }
+                if (entry.contains("size"))
+                    TryReadJsonU64(entry["size"], size);
 
                 std::string fragment;
                 std::string urlPath = url;
@@ -1101,13 +1294,7 @@ namespace shopInstStuff {
                     urlPath = urlPath.substr(0, hashPos);
                 }
 
-                std::string fullUrl;
-                if (urlPath.rfind("http://", 0) == 0 || urlPath.rfind("https://", 0) == 0)
-                    fullUrl = urlPath;
-                else if (!urlPath.empty() && urlPath[0] == '/')
-                    fullUrl = baseUrl + urlPath;
-                else
-                    fullUrl = baseUrl + "/" + urlPath;
+                std::string fullUrl = ResolveLegacyFileUrl(baseUrl, urlPath);
 
                 std::string name;
                 if (!fragment.empty())

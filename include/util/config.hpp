@@ -44,6 +44,8 @@ namespace inst::config {
     extern bool shopHideInstalledSection;
     extern bool shopAllBaseOnly;
     extern bool shopStartGridMode;
+    extern bool shopPhpinfoilRelativeUrls;
+    extern bool shopPhpinfoilHtmlMode;
     extern bool offlineDbAutoCheckOnStartup;
     extern bool verboseInstallLogging;
 

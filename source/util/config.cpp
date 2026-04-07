@@ -33,6 +33,8 @@ namespace inst::config {
     bool shopHideInstalledSection;
     bool shopAllBaseOnly;
     bool shopStartGridMode;
+    bool shopPhpinfoilRelativeUrls;
+    bool shopPhpinfoilHtmlMode;
     bool offlineDbAutoCheckOnStartup;
     bool verboseInstallLogging;
 
@@ -655,6 +657,8 @@ namespace inst::config {
             {"shopHideInstalledSection", shopHideInstalledSection},
             {"shopAllBaseOnly", shopAllBaseOnly},
             {"shopStartGridMode", shopStartGridMode},
+            {"shopPhpinfoilRelativeUrls", shopPhpinfoilRelativeUrls},
+            {"shopPhpinfoilHtmlMode", shopPhpinfoilHtmlMode},
             {"offlineDbAutoCheckOnStartup", offlineDbAutoCheckOnStartup},
             {"verboseInstallLogging", verboseInstallLogging},
             {"shopRememberSelection", false},
@@ -688,6 +692,8 @@ namespace inst::config {
         shopHideInstalledSection = false;
         shopAllBaseOnly = false;
         shopStartGridMode = false;
+        shopPhpinfoilRelativeUrls = false;
+        shopPhpinfoilHtmlMode = false;
         offlineDbAutoCheckOnStartup = true;
         verboseInstallLogging = false;
         bool hasHttpUserAgentModeKey = false;
@@ -723,6 +729,8 @@ namespace inst::config {
             if (j.contains("shopHideInstalledSection")) shopHideInstalledSection = j["shopHideInstalledSection"].get<bool>();
             if (j.contains("shopAllBaseOnly")) shopAllBaseOnly = j["shopAllBaseOnly"].get<bool>();
             if (j.contains("shopStartGridMode")) shopStartGridMode = j["shopStartGridMode"].get<bool>();
+            if (j.contains("shopPhpinfoilRelativeUrls")) shopPhpinfoilRelativeUrls = j["shopPhpinfoilRelativeUrls"].get<bool>();
+            if (j.contains("shopPhpinfoilHtmlMode")) shopPhpinfoilHtmlMode = j["shopPhpinfoilHtmlMode"].get<bool>();
             if (j.contains("offlineDbAutoCheckOnStartup")) offlineDbAutoCheckOnStartup = j["offlineDbAutoCheckOnStartup"].get<bool>();
             if (j.contains("verboseInstallLogging")) verboseInstallLogging = j["verboseInstallLogging"].get<bool>();
 
@@ -750,6 +758,8 @@ namespace inst::config {
                 "shopHideInstalledSection",
                 "shopAllBaseOnly",
                 "shopStartGridMode",
+                "shopPhpinfoilRelativeUrls",
+                "shopPhpinfoilHtmlMode",
                 "offlineDbAutoCheckOnStartup",
                 "verboseInstallLogging"
             };
