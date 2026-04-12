@@ -6,8 +6,8 @@
 #include <string>
 
 extern "C" {
-    bool bx1(const void* authInput, std::size_t authInputLen, std::string& outAuthHex) __attribute__((weak));
-    bool bx2(const void* authInput, std::size_t authInputLen, std::string& outAuthHex) __attribute__((weak));
+    bool z9f2(const void* authInput, std::size_t authInputLen, std::string& outAuthHex) __attribute__((weak));
+    bool z9f3(const void* authInput, std::size_t authInputLen, std::string& outAuthHex) __attribute__((weak));
 }
 
 namespace {
@@ -177,8 +177,8 @@ namespace {
 
         std::string authHex;
         const bool loaded = useUauthSeed
-            ? (bx2 != nullptr && bx2(msg.data(), msg.size(), authHex))
-            : (bx1 != nullptr && bx1(msg.data(), msg.size(), authHex));
+            ? (z9f3 != nullptr && z9f3(msg.data(), msg.size(), authHex))
+            : (z9f2 != nullptr && z9f2(msg.data(), msg.size(), authHex));
 
         if (!loaded || authHex.empty())
             return "0";
@@ -187,6 +187,11 @@ namespace {
 }
 
 namespace inst::util {
+    bool HasLegacyAuthSupport()
+    {
+        return z9f2 != nullptr && z9f3 != nullptr;
+    }
+
     std::string ComputeHauthFromUrl(const std::string& requestUrl)
     {
         std::string hostPart;

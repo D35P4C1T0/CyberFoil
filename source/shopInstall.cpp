@@ -36,12 +36,12 @@
 #include "util/uid.hpp"
 #include "util/util.hpp"
 
-extern "C" {
-    bool bx0_unwrap_shop_key(const void* wrappedKey, std::size_t wrappedLen, void* outAesKey16) __attribute__((weak));
-}
+#ifndef HAVE_LIB_BLOB
+#define HAVE_LIB_BLOB 0
+#endif
 
-namespace inst::util {
-    void SecureWipe(void* ptr, std::size_t len);
+extern "C" {
+    bool z9f1(const void* wrappedKey, std::size_t wrappedLen, void* outAesKey16) __attribute__((weak));
 }
 
 namespace inst::ui {
@@ -109,6 +109,69 @@ namespace {
         return result;
     }
 
+    bool IsLikelyLegacyPayloadAt(const std::string& body, std::size_t offset)
+    {
+        constexpr std::size_t kHeaderSize = 0x110;
+        constexpr std::uint8_t kCompressionNone = 0x00;
+        constexpr std::uint8_t kCompressionZstd = 0x0D;
+        constexpr std::uint8_t kCompressionZlib = 0x0E;
+
+        if (offset > body.size())
+            return false;
+        if ((body.size() - offset) < kHeaderSize)
+            return false;
+        if (body.compare(offset, 7, "TINFOIL") != 0)
+            return false;
+
+        const std::uint8_t info = static_cast<std::uint8_t>(body[offset + 7]);
+        const std::uint8_t compression = info & 0x0F;
+        if (compression != kCompressionNone &&
+            compression != kCompressionZstd &&
+            compression != kCompressionZlib) {
+            return false;
+        }
+
+        // Header looks structurally valid enough to treat as legacy payload.
+        return true;
+    }
+
+    bool FindLegacyPayloadOffset(const std::string& body, std::size_t& outOffset)
+    {
+        outOffset = std::string::npos;
+        if (body.empty())
+            return false;
+
+        if (IsLikelyLegacyPayloadAt(body, 0)) {
+            outOffset = 0;
+            return true;
+        }
+
+        // Some servers/proxies prepend BOM/whitespace/NUL bytes before legacy payload.
+        std::size_t start = 0;
+        if (body.size() >= 3 &&
+            static_cast<unsigned char>(body[0]) == 0xEF &&
+            static_cast<unsigned char>(body[1]) == 0xBB &&
+            static_cast<unsigned char>(body[2]) == 0xBF) {
+            start = 3;
+        }
+
+        while (start < body.size()) {
+            const char c = body[start];
+            if (c == '\0' || c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+                start++;
+                continue;
+            }
+            break;
+        }
+
+        if (start < body.size() && IsLikelyLegacyPayloadAt(body, start)) {
+            outOffset = start;
+            return true;
+        }
+
+        return false;
+    }
+
     void BuildVersionAndRevision(std::string& outVersion, std::string& outRevision)
     {
         const std::string raw = inst::config::shopLegacyMode ? "20.0.2" : inst::config::appVersion;
@@ -143,6 +206,9 @@ namespace {
 
     std::vector<std::string> BuildLegacyHeaders(const std::string& requestUrl, const std::string& user, const std::string& pass)
     {
+        if (!inst::util::HasLegacyAuthSupport())
+            return {};
+
         std::string themeHeader = "Theme: 0000000000000000000000000000000000000000000000000000000000000000";
         std::string versionValue;
         std::string revisionValue;
@@ -283,11 +349,11 @@ namespace {
         outAesKey.clear();
         if (wrappedKey == nullptr)
             return false;
-        if (bx0_unwrap_shop_key == nullptr)
+        if (z9f1 == nullptr)
             return false;
 
         std::array<std::uint8_t, 16> unwrapped{};
-        const bool ok = bx0_unwrap_shop_key(wrappedKey, kLegacyWrappedKeySize, unwrapped.data());
+        const bool ok = z9f1(wrappedKey, kLegacyWrappedKeySize, unwrapped.data());
         if (!ok) {
             inst::util::SecureWipe(unwrapped.data(), unwrapped.size());
             return false;
@@ -318,6 +384,10 @@ namespace {
         std::vector<std::uint8_t> payload(body.begin() + kLegacyHeaderSize, body.end());
 
         if (encrypted) {
+#if !HAVE_LIB_BLOB
+            outError = "This build was made without prebuilt/lib.a; encrypted shop responses are not supported.";
+            return false;
+#else
             std::vector<std::uint8_t> aesKey;
             if (!TryUnwrapLegacyAesKey(reinterpret_cast<const std::uint8_t*>(body.data() + 0x8), aesKey)) {
                 outError = "Encrypted shop response could not be decrypted.";
@@ -346,6 +416,7 @@ namespace {
             if (!aesKey.empty())
                 inst::util::SecureWipe(aesKey.data(), aesKey.size());
             aesKey.clear();
+#endif
         }
 
         std::vector<std::vector<std::uint8_t>> candidates;
@@ -1292,10 +1363,12 @@ namespace shopInstStuff {
             progressCb(bodySize, bodySize);
         }
 
-        if (result.error.empty() && result.body.rfind("TINFOIL", 0) == 0) {
+        std::size_t legacyOffset = std::string::npos;
+        if (result.error.empty() && FindLegacyPayloadOffset(result.body, legacyOffset)) {
             std::string decodedBody;
             std::string decodeError;
-            if (DecodeLegacyPayload(result.body, decodedBody, decodeError))
+            const std::string legacyBody = (legacyOffset == 0) ? result.body : result.body.substr(legacyOffset);
+            if (DecodeLegacyPayload(legacyBody, decodedBody, decodeError))
                 result.body = std::move(decodedBody);
             else
                 result.decodeError = std::move(decodeError);
@@ -1311,19 +1384,24 @@ namespace shopInstStuff {
             return false;
         }
         if (fetch.responseCode == 401 || fetch.responseCode == 403) {
-            error = "Shop requires authentication. Check credentials or enable public shop in eShop.";
+            if (!inst::util::HasLegacyAuthSupport()) {
+                error = "Shop requires legacy HAUTH/UAUTH signing, but this build does not support it.";
+            } else {
+                error = "Shop requires authentication. Check credentials or enable public shop in eShop.";
+            }
             return false;
         }
         if (!fetch.decodeError.empty()) {
             error = fetch.decodeError;
             return false;
         }
-        if (IsLoginUrl(fetch.effectiveUrl.c_str()) || (!fetch.contentType.empty() && fetch.contentType.find("text/html") != std::string::npos) || ContainsHtml(fetch.body)) {
-            error = "eShop returned the login page. Check shop URL, username, and password, or enable public shop.";
+        std::size_t legacyOffset = std::string::npos;
+        if (FindLegacyPayloadOffset(fetch.body, legacyOffset)) {
+            error = "Encrypted shop response could not be decoded.";
             return false;
         }
-        if (fetch.body.rfind("TINFOIL", 0) == 0) {
-            error = "Encrypted shop response could not be decoded.";
+        if (IsLoginUrl(fetch.effectiveUrl.c_str()) || (!fetch.contentType.empty() && fetch.contentType.find("text/html") != std::string::npos) || ContainsHtml(fetch.body)) {
+            error = "eShop returned the login page. Check shop URL, username, and password, or enable public shop.";
             return false;
         }
         return true;

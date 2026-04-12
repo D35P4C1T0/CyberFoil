@@ -99,6 +99,15 @@ namespace inst::util {
         }
     }
 
+    void SecureWipe(void* ptr, std::size_t len)
+    {
+        if (ptr == nullptr || len == 0)
+            return;
+        volatile unsigned char* p = reinterpret_cast<volatile unsigned char*>(ptr);
+        for (std::size_t i = 0; i < len; i++)
+            p[i] = 0;
+    }
+
     void initApp () {
         if (!std::filesystem::exists("sdmc:/switch")) std::filesystem::create_directory("sdmc:/switch");
         if (!std::filesystem::exists(inst::config::appDir)) std::filesystem::create_directory(inst::config::appDir);

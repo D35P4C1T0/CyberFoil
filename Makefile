@@ -67,6 +67,7 @@ ICON		:=	romfs/images/icon.jpg
 ROMFS		:=	romfs
 LIB_BLOB ?= $(TOPDIR)/prebuilt/lib.a
 COMMA := ,
+HAS_LIB_BLOB := $(if $(wildcard $(LIB_BLOB)),1,0)
 
 #---------------------------------------------------------------------------------
 # options for code generation
@@ -74,6 +75,7 @@ COMMA := ,
 DEFINES	+=	-DAPP_VERSION=\"$(APP_VERSION)\"
 DEFINES	+=	-DAPP_GIT_META=\"$(APP_GIT_META)\"
 DEFINES	+=	-DAPP_VERSION_FULL=\"$(APP_VERSION_FULL)\"
+DEFINES += -DHAVE_LIB_BLOB=$(HAS_LIB_BLOB)
 ifeq ($(DEBUG),1)
 DEFINES += -DAPP_DEBUG_LOG
 endif
@@ -98,7 +100,7 @@ LIBS	+=	-lSDL2_mixer -lopusfile -lopus -lmodplug -lmpg123 -lvorbisidec -logg # A
 LIBS	+=	-lpu -lSDL2_gfx -lSDL2_image -lwebp -lpng -ljpeg `sdl2-config --libs` `$(PREFIX)pkg-config --libs freetype2` # Graphics
 LIBS	+=	-lminizip -lzstd # Compression/archive
 LIBS	+=	-lntfs-3g -llwext4
-LIBS_BLOB := $(if $(wildcard $(LIB_BLOB)),-Wl$(COMMA)--whole-archive $(LIB_BLOB) -Wl$(COMMA)--no-whole-archive,)
+LIBS_BLOB := $(if $(filter 1,$(HAS_LIB_BLOB)),-Wl$(COMMA)--whole-archive $(LIB_BLOB) -Wl$(COMMA)--no-whole-archive,)
 LIBS += $(LIBS_BLOB)
 LIBS += -lmbedtls -lmbedx509 -lmbedcrypto # Must come after LIBS_BLOB
 
