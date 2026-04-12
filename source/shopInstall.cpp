@@ -1543,6 +1543,11 @@ namespace shopInstStuff {
                                     helper.CommitLatest();
                                 } catch (...) {}
                             }
+                            // Release IPC handles immediately — no longer needed after
+                            // Register/CommitLatest. Accumulating these across all NCA
+                            // entries exhausts the kernel handle table on large XCI packages.
+                            entry.nca_writer = nullptr;
+                            entry.storage = nullptr;
                         }
                     }
 
