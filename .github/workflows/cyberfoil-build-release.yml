@@ -64,7 +64,7 @@ jobs:
           set -euo pipefail
 
           dkp-pacman -S --noconfirm --needed switch-ntfs-3g switch-lwext4
-          make -j"$(nproc)"
+          make -j"$(nproc)" RELEASE=1
 
           # Your Makefile outputs ./cyberfoil.nro (TARGET := cyberfoil)
           if [ ! -f "./cyberfoil.nro" ]; then
