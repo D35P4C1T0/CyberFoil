@@ -23,8 +23,10 @@
 #include "install/install_nsp.hpp"
 #include "install/install_xci.hpp"
 #include "install/install.hpp"
+#include "install/content_file.hpp"
 #include "install/nca.hpp"
-#include "install/pfs0.hpp"
+#include "install/pfs0_parser.hpp"
+#include "install/stream_install_helper.hpp"
 #include "install/hfs0.hpp"
 #include "data/byte_buffer.hpp"
 #include "nx/nca_writer.h"
@@ -132,10 +134,14 @@ private:
         bool complete = false;
         bool is_nca = false;
         bool is_cnmt = false;
+        bool is_ticket = false;
+        bool is_cert = false;
+        bool has_nca_id = false;
         std::shared_ptr<nx::ncm::ContentStorage> storage;
         std::unique_ptr<NcaWriter> nca_writer;
         std::vector<std::uint8_t> ticket_buf;
         std::vector<std::uint8_t> cert_buf;
+        std::string pair_base_name;
     };
 
     bool ParseHeaderIfReady();
@@ -147,51 +153,16 @@ private:
     std::uint64_t m_total_size = 0;
     std::uint64_t m_received = 0;
     std::vector<std::uint8_t> m_header_bytes;
+    tin::install::PFS0Parser m_header;
     std::vector<EntryState> m_entries;
     size_t m_hint_index = 0;
     bool m_header_parsed = false;
-    std::unique_ptr<class StreamInstallHelper> m_helper;
+    std::unique_ptr<tin::install::StreamingInstallHelper> m_helper;
 };
 
 // XCI/XCZ streaming uses the pull-based installer below.
 
 std::unique_ptr<StreamInstaller> g_stream;
-
-class StreamInstallHelper final : public tin::install::Install {
-public:
-    StreamInstallHelper(NcmStorageId dest_storage, bool ignore_req)
-        : Install(dest_storage, ignore_req) {}
-
-    void AddContentMeta(const nx::ncm::ContentMeta& meta, const NcmContentInfo& info) {
-        m_contentMeta.push_back(meta);
-        m_cnmt_infos.push_back(info);
-    }
-
-    void CommitLatest() {
-        if (m_contentMeta.empty()) return;
-        const size_t idx = m_contentMeta.size() - 1;
-        tin::data::ByteBuffer install_buf;
-        m_contentMeta[idx].GetInstallContentMeta(install_buf, m_cnmt_infos[idx], m_ignoreReqFirmVersion);
-        InstallContentMetaRecords(install_buf, idx);
-        InstallApplicationRecord(idx);
-    }
-
-    void CommitAll() {
-        for (size_t i = 0; i < m_contentMeta.size(); i++) {
-            tin::data::ByteBuffer install_buf;
-            m_contentMeta[i].GetInstallContentMeta(install_buf, m_cnmt_infos[i], m_ignoreReqFirmVersion);
-            InstallContentMetaRecords(install_buf, i);
-            InstallApplicationRecord(i);
-        }
-    }
-
-private:
-    std::vector<NcmContentInfo> m_cnmt_infos;
-
-    std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> ReadCNMT() override { return {}; }
-    void InstallTicketCert() override {}
-    void InstallNCA(const NcmContentId& /*ncaId*/) override {}
-};
 
 bool IsXciName(const std::string& name) {
     auto pos = name.find_last_of('.');
@@ -212,47 +183,45 @@ bool IsNspName(const std::string& name) {
 MtpNspStream::MtpNspStream(std::uint64_t total_size, NcmStorageId dest_storage)
     : m_dest_storage(dest_storage), m_total_size(total_size)
 {
-    m_helper = std::make_unique<StreamInstallHelper>(dest_storage, inst::config::ignoreReqVers);
+    m_helper = std::make_unique<tin::install::StreamingInstallHelper>(dest_storage, inst::config::ignoreReqVers);
 }
 
 
 bool MtpNspStream::ParseHeaderIfReady()
 {
     if (m_header_parsed) return true;
-    if (m_header_bytes.size() < sizeof(tin::install::PFS0BaseHeader)) return false;
-
-    const auto* base = reinterpret_cast<const tin::install::PFS0BaseHeader*>(m_header_bytes.data());
-    if (base->magic != 0x30534650) {
-        StreamTrace("NSP ParseHeader invalid magic=0x%08x", base->magic);
-        THROW_FORMAT("Invalid PFS0 magic");
+    try {
+        if (!m_header.TryLoadHeader(m_header_bytes)) return false;
+    } catch (...) {
+        if (m_header_bytes.size() >= sizeof(tin::install::PFS0BaseHeader)) {
+            const auto* base = reinterpret_cast<const tin::install::PFS0BaseHeader*>(m_header_bytes.data());
+            StreamTrace("NSP ParseHeader invalid magic=0x%08x", base->magic);
+        }
+        throw;
     }
 
-    const size_t header_size = sizeof(tin::install::PFS0BaseHeader) +
-        base->numFiles * sizeof(tin::install::PFS0FileEntry) + base->stringTableSize;
-
-    if (m_header_bytes.size() < header_size) return false;
-
-    m_header_bytes.resize(header_size);
+    const auto* base = m_header.GetBaseHeader();
+    const size_t header_size = m_header.GetDataOffset();
     m_header_parsed = true;
 
     m_entries.clear();
     m_hint_index = 0;
     for (u32 i = 0; i < base->numFiles; i++) {
-        const auto* entry = reinterpret_cast<const tin::install::PFS0FileEntry*>(
-            m_header_bytes.data() + sizeof(tin::install::PFS0BaseHeader) + i * sizeof(tin::install::PFS0FileEntry));
-        const char* name = reinterpret_cast<const char*>(
-            m_header_bytes.data() + sizeof(tin::install::PFS0BaseHeader) +
-            base->numFiles * sizeof(tin::install::PFS0FileEntry) + entry->stringTableOffset);
+        const auto* entry = m_header.GetFileEntry(i);
+        const char* name = m_header.GetFileEntryName(entry);
 
         EntryState st;
         st.name = name;
         st.data_offset = header_size + entry->dataOffset;
         st.size = entry->fileSize;
-        st.is_nca = st.name.find(".nca") != std::string::npos || st.name.find(".ncz") != std::string::npos;
-        st.is_cnmt = st.name.find(".cnmt.nca") != std::string::npos || st.name.find(".cnmt.ncz") != std::string::npos;
-        if (st.is_nca && st.name.size() >= 32) {
-            st.nca_id = tin::util::GetNcaIdFromString(st.name.substr(0, 32));
-        }
+        const auto info = tin::install::ClassifyContentFile(st.name);
+        st.is_nca = info.is_nca;
+        st.is_cnmt = info.is_cnmt;
+        st.is_ticket = info.is_ticket;
+        st.is_cert = info.is_cert;
+        st.has_nca_id = info.has_nca_id;
+        st.nca_id = info.nca_id;
+        st.pair_base_name = info.pair_base_name;
         m_entries.emplace_back(std::move(st));
     }
     std::sort(m_entries.begin(), m_entries.end(), [](const EntryState& a, const EntryState& b) {
@@ -262,6 +231,9 @@ bool MtpNspStream::ParseHeaderIfReady()
         static_cast<unsigned>(base->numFiles),
         header_size,
         static_cast<unsigned long long>(m_total_size));
+
+    m_header_bytes.clear();
+    m_header_bytes.shrink_to_fit();
 
     return true;
 }
@@ -292,19 +264,11 @@ bool MtpNspStream::CommitCnmt(EntryState& entry)
     if (!entry.is_cnmt || !entry.storage) return false;
 
     try {
-        std::string cnmt_path = entry.storage->GetPath(entry.nca_id);
-        nx::ncm::ContentMeta meta = tin::util::GetContentMetaFromNCA(cnmt_path);
-        {
-            const auto key = meta.GetContentMetaKey();
-            const auto base_id = tin::util::GetBaseTitleId(key.id, static_cast<NcmContentMetaType>(key.type));
-            g_stream_title_id.store(base_id, std::memory_order_relaxed);
-        }
-        NcmContentInfo cnmt_info{};
-        cnmt_info.content_id = entry.nca_id;
-        ncmU64ToContentInfoSize(entry.size & 0xFFFFFFFFFFFF, &cnmt_info);
-        cnmt_info.content_type = NcmContentType_Meta;
-        m_helper->AddContentMeta(meta, cnmt_info);
-        m_helper->CommitLatest();
+        u64 baseTitleId = 0;
+        if (!m_helper->CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size, &baseTitleId))
+            throw std::runtime_error("Failed to commit CNMT");
+
+        g_stream_title_id.store(baseTitleId, std::memory_order_relaxed);
         StreamTrace("NSP CommitCnmt ok name='%s' size=%llu",
             entry.name.c_str(),
             static_cast<unsigned long long>(entry.size));
@@ -337,7 +301,7 @@ bool MtpNspStream::WriteEntryData(EntryState& entry, const std::uint8_t* data, s
         }
     }
 
-    if (entry.name.find(".tik") != std::string::npos) {
+    if (entry.is_ticket) {
         entry.ticket_buf.insert(entry.ticket_buf.end(), data, data + size);
         entry.written += size;
         if (entry.written >= entry.size) {
@@ -345,7 +309,7 @@ bool MtpNspStream::WriteEntryData(EntryState& entry, const std::uint8_t* data, s
         }
         return true;
     }
-    if (entry.name.find(".cert") != std::string::npos) {
+    if (entry.is_cert) {
         entry.cert_buf.insert(entry.cert_buf.end(), data, data + size);
         entry.written += size;
         if (entry.written >= entry.size) {
@@ -475,14 +439,10 @@ bool MtpNspStream::Finalize()
     std::unordered_map<std::string, std::vector<std::uint8_t>> tickets_by_base;
     std::unordered_map<std::string, std::vector<std::uint8_t>> certs_by_base;
     for (const auto& entry : m_entries) {
-        const auto tik_pos = entry.name.rfind(".tik");
-        if (tik_pos != std::string::npos && tik_pos + 4 == entry.name.size()) {
-            tickets_by_base[entry.name.substr(0, tik_pos)] = entry.ticket_buf;
-        }
-        const auto cert_pos = entry.name.rfind(".cert");
-        if (cert_pos != std::string::npos && cert_pos + 5 == entry.name.size()) {
-            certs_by_base[entry.name.substr(0, cert_pos)] = entry.cert_buf;
-        }
+        if (entry.is_ticket)
+            tickets_by_base[entry.pair_base_name] = entry.ticket_buf;
+        if (entry.is_cert)
+            certs_by_base[entry.pair_base_name] = entry.cert_buf;
     }
 
     std::unordered_set<std::string> base_names;
@@ -733,7 +693,7 @@ class MtpXciStreamPull final : public StreamInstaller {
 public:
     explicit MtpXciStreamPull(std::uint64_t total_size, NcmStorageId dest_storage)
         : m_dest_storage(dest_storage), m_total_size(total_size), m_buffer(8 * 1024 * 1024) {
-        m_helper = std::make_unique<StreamInstallHelper>(dest_storage, inst::config::ignoreReqVers);
+        m_helper = std::make_unique<tin::install::StreamingInstallHelper>(dest_storage, inst::config::ignoreReqVers);
         StreamTrace("XCI ctor total=%llu storage=%u",
             static_cast<unsigned long long>(total_size),
             static_cast<unsigned>(dest_storage));
@@ -806,10 +766,14 @@ private:
         bool complete = false;
         bool is_nca = false;
         bool is_cnmt = false;
+        bool is_ticket = false;
+        bool is_cert = false;
+        bool has_nca_id = false;
         std::shared_ptr<nx::ncm::ContentStorage> storage;
         std::unique_ptr<NcaWriter> nca_writer;
         std::vector<std::uint8_t> ticket_buf;
         std::vector<std::uint8_t> cert_buf;
+        std::string pair_base_name;
     };
 
     bool EnsureEntryStarted(EntryState& entry) {
@@ -832,19 +796,11 @@ private:
         if (!entry.is_cnmt || !entry.storage) return false;
 
         try {
-            std::string cnmt_path = entry.storage->GetPath(entry.nca_id);
-            nx::ncm::ContentMeta meta = tin::util::GetContentMetaFromNCA(cnmt_path);
-            {
-                const auto key = meta.GetContentMetaKey();
-                const auto base_id = tin::util::GetBaseTitleId(key.id, static_cast<NcmContentMetaType>(key.type));
-                g_stream_title_id.store(base_id, std::memory_order_relaxed);
-            }
-            NcmContentInfo cnmt_info{};
-            cnmt_info.content_id = entry.nca_id;
-            ncmU64ToContentInfoSize(entry.size & 0xFFFFFFFFFFFF, &cnmt_info);
-            cnmt_info.content_type = NcmContentType_Meta;
-            m_helper->AddContentMeta(meta, cnmt_info);
-            m_helper->CommitLatest();
+            u64 baseTitleId = 0;
+            if (!m_helper->CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size, &baseTitleId))
+                throw std::runtime_error("Failed to commit CNMT");
+
+            g_stream_title_id.store(baseTitleId, std::memory_order_relaxed);
             return true;
         } catch (...) {
             return false;
@@ -852,7 +808,7 @@ private:
     }
 
     bool WriteEntryData(EntryState& entry, const std::uint8_t* data, size_t size) {
-        if (entry.name.find(".tik") != std::string::npos) {
+        if (entry.is_ticket) {
             entry.ticket_buf.insert(entry.ticket_buf.end(), data, data + size);
             entry.written += size;
             if (entry.written >= entry.size) {
@@ -860,7 +816,7 @@ private:
             }
             return true;
         }
-        if (entry.name.find(".cert") != std::string::npos) {
+        if (entry.is_cert) {
             entry.cert_buf.insert(entry.cert_buf.end(), data, data + size);
             entry.written += size;
             if (entry.written >= entry.size) {
@@ -906,11 +862,14 @@ private:
             EntryState entry;
             entry.name = collection.name;
             entry.size = collection.size;
-            entry.is_nca = entry.name.find(".nca") != std::string::npos || entry.name.find(".ncz") != std::string::npos;
-            entry.is_cnmt = entry.name.find(".cnmt.nca") != std::string::npos || entry.name.find(".cnmt.ncz") != std::string::npos;
-            if (entry.is_nca && entry.name.size() >= 32) {
-                entry.nca_id = tin::util::GetNcaIdFromString(entry.name.substr(0, 32));
-            }
+            const auto info = tin::install::ClassifyContentFile(entry.name);
+            entry.is_nca = info.is_nca;
+            entry.is_cnmt = info.is_cnmt;
+            entry.is_ticket = info.is_ticket;
+            entry.is_cert = info.is_cert;
+            entry.has_nca_id = info.has_nca_id;
+            entry.nca_id = info.nca_id;
+            entry.pair_base_name = info.pair_base_name;
 
             if (!EnsureEntryStarted(entry)) {
                 StreamTrace("XCI EnsureEntryStarted fail name='%s'", entry.name.c_str());
@@ -954,14 +913,13 @@ private:
         }
 
         for (auto& [name, entry] : entries) {
-            if (entry.name.find(".tik") != std::string::npos) {
-                const auto base = entry.name.substr(0, entry.name.size() - 4);
-                auto it = entries.find(base + ".cert");
+            if (entry.is_ticket) {
+                auto it = entries.find(entry.pair_base_name + ".cert");
                 if (it != entries.end() && !entry.ticket_buf.empty() && !it->second.cert_buf.empty()) {
                     const Result rc = esImportTicket(entry.ticket_buf.data(), entry.ticket_buf.size(), it->second.cert_buf.data(), it->second.cert_buf.size());
                     if (R_FAILED(rc)) {
                         LOG_DEBUG("MTP XCI finalize: ticket import failed (0x%08x)\n", rc);
-                        StreamTrace("XCI ticket import fail base='%s' rc=0x%08x", base.c_str(), rc);
+                        StreamTrace("XCI ticket import fail base='%s' rc=0x%08x", entry.pair_base_name.c_str(), rc);
                         return false;
                     }
                 }
@@ -990,7 +948,7 @@ private:
     std::thread m_thread;
     std::atomic<bool> m_done{false};
     std::atomic<bool> m_ok{true};
-    std::unique_ptr<StreamInstallHelper> m_helper;
+    std::unique_ptr<tin::install::StreamingInstallHelper> m_helper;
 };
 
 } // namespace

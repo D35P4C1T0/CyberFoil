@@ -14,10 +14,12 @@
 #include <zstd.h>
 #include <mbedtls/aes.h>
 #include "shopInstall.hpp"
+#include "install/content_file.hpp"
 #include "install/http_nsp.hpp"
 #include "install/http_xci.hpp"
 #include "install/install.hpp"
 #include "install/install_nsp.hpp"
+#include "install/stream_install_helper.hpp"
 #include "install/install_xci.hpp"
 #include "nx/nca_writer.h"
 #include "util/file_util.hpp"
@@ -1867,41 +1869,6 @@ namespace shopInstStuff {
     }
 
     namespace {
-        class StreamInstallHelper final : public tin::install::Install {
-        public:
-            StreamInstallHelper(NcmStorageId dest_storage, bool ignore_req)
-                : Install(dest_storage, ignore_req) {}
-
-            void AddContentMeta(const nx::ncm::ContentMeta& meta, const NcmContentInfo& info) {
-                m_contentMeta.push_back(meta);
-                m_cnmt_infos.push_back(info);
-            }
-
-            void CommitLatest() {
-                if (m_contentMeta.empty()) return;
-                const size_t idx = m_contentMeta.size() - 1;
-                tin::data::ByteBuffer install_buf;
-                m_contentMeta[idx].GetInstallContentMeta(install_buf, m_cnmt_infos[idx], m_ignoreReqFirmVersion);
-                InstallContentMetaRecords(install_buf, idx);
-                InstallApplicationRecord(idx);
-            }
-
-            void CommitAll() {
-                for (size_t i = 0; i < m_contentMeta.size(); i++) {
-                    tin::data::ByteBuffer install_buf;
-                    m_contentMeta[i].GetInstallContentMeta(install_buf, m_cnmt_infos[i], m_ignoreReqFirmVersion);
-                    InstallContentMetaRecords(install_buf, i);
-                    InstallApplicationRecord(i);
-                }
-            }
-
-        private:
-            std::vector<NcmContentInfo> m_cnmt_infos;
-            std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> ReadCNMT() override { return {}; }
-            void InstallTicketCert() override {}
-            void InstallNCA(const NcmContentId& /*ncaId*/) override {}
-        };
-
         class HttpStreamSource {
         public:
             explicit HttpStreamSource(tin::network::HTTPDownload& download) : m_download(download) {}
@@ -2057,10 +2024,14 @@ namespace shopInstStuff {
                 bool complete = false;
                 bool is_nca = false;
                 bool is_cnmt = false;
+                bool is_ticket = false;
+                bool is_cert = false;
+                bool has_nca_id = false;
                 std::shared_ptr<nx::ncm::ContentStorage> storage;
                 std::unique_ptr<NcaWriter> nca_writer;
                 std::vector<std::uint8_t> ticket_buf;
                 std::vector<std::uint8_t> cert_buf;
+                std::string pair_base_name;
             };
 
             auto ensureStarted = [&](EntryState& entry) {
@@ -2076,7 +2047,7 @@ namespace shopInstStuff {
                 return true;
             };
 
-            StreamInstallHelper helper(dest_storage, inst::config::ignoreReqVers);
+            tin::install::StreamingInstallHelper helper(dest_storage, inst::config::ignoreReqVers);
 
             std::unordered_map<std::string, EntryState> entries;
             entries.reserve(collections.size());
@@ -2105,11 +2076,14 @@ namespace shopInstStuff {
                 EntryState entry;
                 entry.name = collection.name;
                 entry.size = collection.size;
-                entry.is_nca = entry.name.find(".nca") != std::string::npos || entry.name.find(".ncz") != std::string::npos;
-                entry.is_cnmt = entry.name.find(".cnmt.nca") != std::string::npos || entry.name.find(".cnmt.ncz") != std::string::npos;
-                if (entry.is_nca && entry.name.size() >= 32) {
-                    entry.nca_id = tin::util::GetNcaIdFromString(entry.name.substr(0, 32));
-                }
+                const auto info = tin::install::ClassifyContentFile(entry.name);
+                entry.is_nca = info.is_nca;
+                entry.is_cnmt = info.is_cnmt;
+                entry.is_ticket = info.is_ticket;
+                entry.is_cert = info.is_cert;
+                entry.has_nca_id = info.has_nca_id;
+                entry.nca_id = info.nca_id;
+                entry.pair_base_name = info.pair_base_name;
 
                 if (!ensureStarted(entry)) return false;
 
@@ -2131,11 +2105,11 @@ namespace shopInstStuff {
                         return false;
                     }
 
-                    if (entry.name.find(".tik") != std::string::npos) {
+                    if (entry.is_ticket) {
                         entry.ticket_buf.insert(entry.ticket_buf.end(), buf.data(), buf.data() + bytes_read);
                         entry.written += bytes_read;
                         if (entry.written >= entry.size) entry.complete = true;
-                    } else if (entry.name.find(".cert") != std::string::npos) {
+                    } else if (entry.is_cert) {
                         entry.cert_buf.insert(entry.cert_buf.end(), buf.data(), buf.data() + bytes_read);
                         entry.written += bytes_read;
                         if (entry.written >= entry.size) entry.complete = true;
@@ -2150,15 +2124,8 @@ namespace shopInstStuff {
                             } catch (...) {}
                             entry.complete = true;
                             if (entry.is_cnmt) {
-                                try {
-                                    std::string cnmt_path = entry.storage->GetPath(entry.nca_id);
-                                    nx::ncm::ContentMeta meta = tin::util::GetContentMetaFromNCA(cnmt_path);
-                                    NcmContentInfo cnmt_info{};
-                                    cnmt_info.content_id = entry.nca_id;
-                                    ncmU64ToContentInfoSize(entry.size & 0xFFFFFFFFFFFF, &cnmt_info);
-                                    cnmt_info.content_type = NcmContentType_Meta;
-                                    helper.AddContentMeta(meta, cnmt_info);
-                                    helper.CommitLatest();
+                            try {
+                                    helper.CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size);
                                 } catch (...) {}
                             }
                             // Release IPC handles immediately — no longer needed after
@@ -2216,9 +2183,8 @@ namespace shopInstStuff {
                     cleanupEntries();
                     THROW_FORMAT("Installation canceled.");
                 }
-                if (entry.name.find(".tik") != std::string::npos) {
-                    const auto base = entry.name.substr(0, entry.name.size() - 4);
-                    auto it = entries.find(base + ".cert");
+                if (entry.is_ticket) {
+                    auto it = entries.find(entry.pair_base_name + ".cert");
                     if (it != entries.end() && !entry.ticket_buf.empty() && !it->second.cert_buf.empty()) {
                         ASSERT_OK(esImportTicket(entry.ticket_buf.data(), entry.ticket_buf.size(), it->second.cert_buf.data(), it->second.cert_buf.size()),
                             "Failed to import ticket");

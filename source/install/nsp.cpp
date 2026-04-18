@@ -32,112 +32,49 @@ namespace tin::install::nsp
 {
     NSP::NSP() {}
 
-    // TODO: Do verification: PFS0 magic, sizes not zero
     void NSP::RetrieveHeader()
     {
         LOG_DEBUG("Retrieving remote NSP header...\n");
-
-        // Retrieve the base header
-        m_headerBytes.resize(sizeof(PFS0BaseHeader), 0);
-        this->BufferData(m_headerBytes.data(), 0x0, sizeof(PFS0BaseHeader));
-
-        LOG_DEBUG("Base header: \n");
-        printBytes(m_headerBytes.data(), sizeof(PFS0BaseHeader), true);
-
-        // Retrieve the full header
-        size_t remainingHeaderSize = this->GetBaseHeader()->numFiles * sizeof(PFS0FileEntry) + this->GetBaseHeader()->stringTableSize;
-        m_headerBytes.resize(sizeof(PFS0BaseHeader) + remainingHeaderSize, 0);
-        this->BufferData(m_headerBytes.data() + sizeof(PFS0BaseHeader), sizeof(PFS0BaseHeader), remainingHeaderSize);
+        m_header.RetrieveHeader([this](void* buf, off_t offset, size_t size) {
+            this->BufferData(buf, offset, size);
+        });
 
         LOG_DEBUG("Full header: \n");
-        printBytes(m_headerBytes.data(), m_headerBytes.size(), true);
+        printBytes(reinterpret_cast<u8*>(const_cast<PFS0BaseHeader*>(m_header.GetBaseHeader())), m_header.GetDataOffset(), true);
     }
 
     const PFS0FileEntry* NSP::GetFileEntry(unsigned int index)
     {
-        if (index >= this->GetBaseHeader()->numFiles)
-            THROW_FORMAT("File entry index is out of bounds\n");
-
-        size_t fileEntryOffset = sizeof(PFS0BaseHeader) + index * sizeof(PFS0FileEntry);
-
-        if (m_headerBytes.size() < fileEntryOffset + sizeof(PFS0FileEntry))
-            THROW_FORMAT("Header bytes is too small to get file entry!");
-
-        return reinterpret_cast<PFS0FileEntry*>(m_headerBytes.data() + fileEntryOffset);
+        return m_header.GetFileEntry(index);
     }
 
     std::vector<const PFS0FileEntry*> NSP::GetFileEntriesByExtension(std::string extension)
     {
-        std::vector<const PFS0FileEntry*> entryList;
-
-        for (unsigned int i = 0; i < this->GetBaseHeader()->numFiles; i++)
-        {
-            const PFS0FileEntry* fileEntry = this->GetFileEntry(i);
-            std::string name(this->GetFileEntryName(fileEntry));
-            auto foundExtension = name.substr(name.find(".") + 1); 
-
-            if (foundExtension == extension)
-                entryList.push_back(fileEntry);
-        }
-
-        return entryList;
+        return m_header.GetFileEntriesByExtension(extension);
     }
 
     const PFS0FileEntry* NSP::GetFileEntryByName(std::string name)
     {
-        for (unsigned int i = 0; i < this->GetBaseHeader()->numFiles; i++)
-        {
-            const PFS0FileEntry* fileEntry = this->GetFileEntry(i);
-            std::string foundName(this->GetFileEntryName(fileEntry));
-
-            if (foundName == name)
-                return fileEntry;
-        }
-
-        return nullptr;
+        return m_header.GetFileEntryByName(name);
     }
 
     const PFS0FileEntry* NSP::GetFileEntryByNcaId(const NcmContentId& ncaId)
     {
-        const PFS0FileEntry* fileEntry = nullptr;
-        std::string ncaIdStr = tin::util::GetNcaIdString(ncaId);
-
-        if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".nca")) == nullptr)
-        {
-            if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".cnmt.nca")) == nullptr)
-            {
-                    if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".ncz")) == nullptr)
-                    {
-                         if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".cnmt.ncz")) == nullptr)
-                         {
-                              return nullptr;
-                         }
-                    }
-            }
-        }
-
-        return fileEntry;
+        return m_header.GetFileEntryByNcaId(ncaId);
     }
 
     const char* NSP::GetFileEntryName(const PFS0FileEntry* fileEntry)
     {
-        u64 stringTableStart = sizeof(PFS0BaseHeader) + this->GetBaseHeader()->numFiles * sizeof(PFS0FileEntry);
-        return reinterpret_cast<const char*>(m_headerBytes.data() + stringTableStart + fileEntry->stringTableOffset);
+        return m_header.GetFileEntryName(fileEntry);
     }
 
     const PFS0BaseHeader* NSP::GetBaseHeader()
     {
-        if (m_headerBytes.empty())
-            THROW_FORMAT("Cannot retrieve header as header bytes are empty. Have you retrieved it yet?\n");
-
-        return reinterpret_cast<PFS0BaseHeader*>(m_headerBytes.data());
+        return m_header.GetBaseHeader();
     }
 
     u64 NSP::GetDataOffset()
     {
-        if (m_headerBytes.empty())
-            THROW_FORMAT("Cannot get data offset as header is empty. Have you retrieved it yet?\n");
-
-        return m_headerBytes.size();
+        return m_header.GetDataOffset();
     }
 }

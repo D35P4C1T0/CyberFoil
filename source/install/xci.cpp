@@ -21,6 +21,7 @@ SOFTWARE.
 */
 
 #include "install/xci.hpp"
+#include "install/content_file.hpp"
 #include "util/title_util.hpp"
 #include "error.hpp"
 #include "debug.h"
@@ -143,24 +144,13 @@ namespace tin::install::xci
 
     const HFS0FileEntry* XCI::GetFileEntryByNcaId(const NcmContentId& ncaId)
     {
-        const HFS0FileEntry* fileEntry = nullptr;
-        std::string ncaIdStr = tin::util::GetNcaIdString(ncaId);
-
-        if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".nca")) == nullptr)
+        for (const auto& candidate : tin::install::GetContentFileNameCandidates(ncaId))
         {
-            if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".cnmt.nca")) == nullptr)
-            {
-                    if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".ncz")) == nullptr)
-                    {
-                         if ((fileEntry = this->GetFileEntryByName(ncaIdStr + ".cnmt.ncz")) == nullptr)
-                         {
-                              return nullptr;
-                         }
-                    }
-            }
+            if (const auto* fileEntry = this->GetFileEntryByName(candidate))
+                return fileEntry;
         }
 
-        return fileEntry;
+        return nullptr;
     }
 
     std::vector<const HFS0FileEntry*> XCI::GetFileEntriesByExtension(std::string extension)

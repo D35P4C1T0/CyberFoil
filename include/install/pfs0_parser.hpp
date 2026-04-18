@@ -23,35 +23,37 @@ SOFTWARE.
 #pragma once
 
 #include <functional>
+#include <string>
 #include <vector>
 
+#include <sys/types.h>
 #include <switch/types.h>
-#include "install/pfs0_parser.hpp"
-#include "nx/ncm.hpp"
-#include "util/network_util.hpp"
 
-namespace tin::install::nsp
+#include "install/pfs0.hpp"
+#include "nx/ncm.hpp"
+
+namespace tin::install
 {
-    class NSP
+    class PFS0Parser
     {
         protected:
-            tin::install::PFS0Parser m_header;
-
-            NSP();
+            std::vector<u8> m_headerBytes;
 
         public:
-            virtual void StreamToPlaceholder(std::shared_ptr<nx::ncm::ContentStorage>& contentStorage, NcmContentId placeholderId) = 0;
-            virtual void BufferData(void* buf, off_t offset, size_t size) = 0;
+            void RetrieveHeader(const std::function<void(void* buf, off_t offset, size_t size)>& bufferData);
+            bool TryLoadHeader(std::vector<u8> headerBytes);
 
-            virtual void RetrieveHeader();
-            virtual const PFS0BaseHeader* GetBaseHeader();
-            virtual u64 GetDataOffset();
+            const PFS0BaseHeader* GetBaseHeader() const;
+            u64 GetDataOffset() const;
 
-            virtual const PFS0FileEntry* GetFileEntry(unsigned int index);
-            virtual const PFS0FileEntry* GetFileEntryByName(std::string name);
-            virtual const PFS0FileEntry* GetFileEntryByNcaId(const NcmContentId& ncaId);
-            virtual std::vector<const PFS0FileEntry*> GetFileEntriesByExtension(std::string extension);
+            const PFS0FileEntry* GetFileEntry(unsigned int index) const;
+            const PFS0FileEntry* GetFileEntryByName(const std::string& name) const;
+            const PFS0FileEntry* GetFileEntryByNcaId(const NcmContentId& ncaId) const;
+            std::vector<const PFS0FileEntry*> GetFileEntriesByExtension(const std::string& extension) const;
 
-            virtual const char* GetFileEntryName(const PFS0FileEntry* fileEntry);
+            const char* GetFileEntryName(const PFS0FileEntry* fileEntry) const;
+
+        private:
+            size_t GetExpectedHeaderSize() const;
     };
 }
