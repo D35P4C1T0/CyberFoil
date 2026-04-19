@@ -20,58 +20,51 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
-#include <thread>
-
 #include "install/install_xci.hpp"
-#include "install/package_install_helper.hpp"
-#include "util/file_util.hpp"
-#include "util/debug.h"
-#include "install/nca.hpp"
+#include "install/content_file.hpp"
 
 namespace tin::install::xci
 {
+    namespace
+    {
+        std::vector<tin::install::PackageCollectionEntry> BuildCollections(const std::shared_ptr<XCI>& xci)
+        {
+            xci->RetrieveHeader();
+
+            std::vector<tin::install::PackageCollectionEntry> collections;
+            const auto* secureHeader = xci->GetSecureHeader();
+            collections.reserve(secureHeader->numFiles);
+
+            const u64 dataOffset = xci->GetDataOffset();
+            for (u32 i = 0; i < secureHeader->numFiles; i++)
+            {
+                const auto* fileEntry = xci->GetFileEntry(i);
+                tin::install::PackageCollectionEntry entry;
+                entry.fileName = xci->GetFileEntryName(fileEntry);
+                entry.dataOffset = dataOffset + fileEntry->dataOffset;
+                entry.fileSize = fileEntry->fileSize;
+                entry.contentInfo = tin::install::ClassifyContentFile(entry.fileName);
+                collections.push_back(std::move(entry));
+            }
+
+            return collections;
+        }
+    }
+
     XCIInstallTask::XCIInstallTask(NcmStorageId destStorageId, bool ignoreReqFirmVersion, const std::shared_ptr<XCI>& xci) :
-        Install(destStorageId, ignoreReqFirmVersion), m_xci(xci)
-    {
-        m_xci->RetrieveHeader();
-    }
-
-    std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> XCIInstallTask::ReadCNMT()
-    {
-        return tin::install::ReadCnmtFromPackage(*m_xci, m_destStorageId, [this](const NcmContentId& ncaId) {
-            this->InstallNCA(ncaId);
-        });
-    }
-
-    void XCIInstallTask::InstallNCA(const NcmContentId& ncaId)
-    {
-        const HFS0FileEntry* fileEntry = m_xci->GetFileEntryByNcaId(ncaId);
-        tin::install::PackageNcaEntryInfo entryInfo{
-            .fileName = m_xci->GetFileEntryName(fileEntry),
-            .dataOffset = m_xci->GetDataOffset() + fileEntry->dataOffset,
-            .fileSize = fileEntry->fileSize,
-        };
-
-        tin::install::InstallNcaFromPackage(
-            ncaId,
-            entryInfo,
-            m_destStorageId,
-            m_declinedValidation,
-            [this](void* buf, u64 offset, size_t size) {
-                m_xci->BufferData(buf, offset, size);
+        tin::install::CollectionInstall(
+            destStorageId,
+            ignoreReqFirmVersion,
+            BuildCollections(xci),
+            [xci](void* buf, u64 offset, size_t size) {
+                xci->BufferData(buf, offset, size);
             },
-            [this](std::shared_ptr<nx::ncm::ContentStorage>& contentStorage, NcmContentId id) {
-                m_xci->StreamToPlaceholder(contentStorage, id);
-            },
-            []() {
-                LOG_DEBUG("                                                           \r");
-            });
-    }
-
-    void XCIInstallTask::InstallTicketCert()
+            [xci](
+                std::shared_ptr<nx::ncm::ContentStorage>& contentStorage,
+                const tin::install::PackageCollectionEntry&,
+                NcmContentId contentId) {
+                xci->StreamToPlaceholder(contentStorage, contentId);
+            })
     {
-        tin::install::InstallTicketCertFromPackage(*m_xci, [this](void* buf, u64 dataOffset, size_t size) {
-            m_xci->BufferData(buf, m_xci->GetDataOffset() + dataOffset, size);
-        });
     }
 }

@@ -22,6 +22,7 @@ SOFTWARE.
 
 #include "install/package_install_helper.hpp"
 
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <thread>
@@ -41,13 +42,29 @@ namespace inst::ui {
 
 namespace tin::install
 {
-    void InstallNcaFromPackage(
+    const PackageCollectionEntry* FindCollectionEntryByNcaId(
+        const std::vector<PackageCollectionEntry>& collections,
+        const NcmContentId& ncaId)
+    {
+        for (const auto& entry : collections)
+        {
+            if (!entry.contentInfo.has_nca_id)
+                continue;
+
+            if (std::memcmp(&entry.contentInfo.nca_id, &ncaId, sizeof(NcmContentId)) == 0)
+                return &entry;
+        }
+
+        return nullptr;
+    }
+
+    void InstallNcaFromCollection(
         const NcmContentId& ncaId,
-        const PackageNcaEntryInfo& entryInfo,
+        const PackageCollectionEntry& entryInfo,
         NcmStorageId destStorageId,
         bool& declinedValidation,
-        const std::function<void(void* buf, u64 offset, size_t size)>& bufferData,
-        const std::function<void(std::shared_ptr<nx::ncm::ContentStorage>& contentStorage, NcmContentId ncaId)>& streamToPlaceholder,
+        const BufferDataFunction& bufferData,
+        const StreamCollectionToPlaceholderFunction& streamToPlaceholder,
         const std::function<void()>& afterStream)
     {
         LOG_DEBUG("Installing %s to storage Id %u\n", entryInfo.fileName.c_str(), destStorageId);
@@ -94,7 +111,7 @@ namespace tin::install
                 }
             }
 
-            streamToPlaceholder(contentStorage, ncaId);
+            streamToPlaceholder(contentStorage, entryInfo, ncaId);
             if (afterStream)
                 afterStream();
 
@@ -124,5 +141,106 @@ namespace tin::install
             } catch (...) {}
             throw;
         }
+    }
+
+    std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> ReadCnmtFromCollections(
+        const std::vector<PackageCollectionEntry>& collections,
+        NcmStorageId destStorageId,
+        const InstallCollectionNcaFunction& installNca)
+    {
+        std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> cnmtList;
+
+        for (const auto& entry : collections)
+        {
+            if (!entry.contentInfo.is_cnmt || !entry.contentInfo.has_nca_id)
+                continue;
+
+            const NcmContentId cnmtContentId = entry.contentInfo.nca_id;
+            const size_t cnmtNcaSize = entry.fileSize;
+
+            nx::ncm::ContentStorage contentStorage(destStorageId);
+
+            LOG_DEBUG("CNMT Name: %s\n", entry.fileName.c_str());
+
+            installNca(entry, cnmtContentId);
+            std::string cnmtNcaFullPath = contentStorage.GetPath(cnmtContentId);
+
+            NcmContentInfo cnmtContentInfo{};
+            cnmtContentInfo.content_id = cnmtContentId;
+            ncmU64ToContentInfoSize(cnmtNcaSize & 0xFFFFFFFFFFFF, &cnmtContentInfo);
+            cnmtContentInfo.content_type = NcmContentType_Meta;
+
+            cnmtList.push_back({ tin::util::GetContentMetaFromNCA(cnmtNcaFullPath), cnmtContentInfo });
+        }
+
+        return cnmtList;
+    }
+
+    void InstallTicketCertFromCollections(
+        const std::vector<PackageCollectionEntry>& collections,
+        const BufferDataFunction& bufferData)
+    {
+        std::unordered_map<std::string, const PackageCollectionEntry*> certEntriesByBase;
+        for (const auto& entry : collections)
+        {
+            if (!entry.contentInfo.is_cert)
+                continue;
+
+            certEntriesByBase[entry.contentInfo.pair_base_name] = &entry;
+        }
+
+        for (const auto& entry : collections)
+        {
+            if (!entry.contentInfo.is_ticket)
+                continue;
+
+            const auto certIt = certEntriesByBase.find(entry.contentInfo.pair_base_name);
+            if (certIt == certEntriesByBase.end() || certIt->second == nullptr)
+            {
+                LOG_DEBUG("Remote cert file is missing.\n");
+                THROW_FORMAT("Remote cert file is not present!");
+            }
+
+            const u64 tikSize = entry.fileSize;
+            auto tikBuf = std::make_unique<u8[]>(tikSize);
+            LOG_DEBUG("> Reading tik\n");
+            bufferData(tikBuf.get(), entry.dataOffset, tikSize);
+
+            const u64 certSize = certIt->second->fileSize;
+            auto certBuf = std::make_unique<u8[]>(certSize);
+            LOG_DEBUG("> Reading cert\n");
+            bufferData(certBuf.get(), certIt->second->dataOffset, certSize);
+
+            ASSERT_OK(esImportTicket(tikBuf.get(), tikSize, certBuf.get(), certSize), "Failed to import ticket");
+        }
+    }
+
+    void InstallNcaFromPackage(
+        const NcmContentId& ncaId,
+        const PackageNcaEntryInfo& entryInfo,
+        NcmStorageId destStorageId,
+        bool& declinedValidation,
+        const std::function<void(void* buf, u64 offset, size_t size)>& bufferData,
+        const std::function<void(std::shared_ptr<nx::ncm::ContentStorage>& contentStorage, NcmContentId ncaId)>& streamToPlaceholder,
+        const std::function<void()>& afterStream)
+    {
+        InstallNcaFromCollection(
+            ncaId,
+            PackageCollectionEntry{
+                .fileName = entryInfo.fileName,
+                .dataOffset = entryInfo.dataOffset,
+                .fileSize = entryInfo.fileSize,
+                .contentInfo = ClassifyContentFile(entryInfo.fileName),
+            },
+            destStorageId,
+            declinedValidation,
+            bufferData,
+            [&streamToPlaceholder](
+                std::shared_ptr<nx::ncm::ContentStorage>& contentStorage,
+                const PackageCollectionEntry&,
+                NcmContentId contentId) {
+                streamToPlaceholder(contentStorage, contentId);
+            },
+            afterStream);
     }
 }

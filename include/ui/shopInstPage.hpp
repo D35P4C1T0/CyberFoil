@@ -70,7 +70,6 @@ namespace inst::ui {
             bool nativeDlcSectionPresent = false;
             bool saveSyncEnabled = false;
             bool saveSyncLoaded = false;
-            bool pendingMotdFetch = false;
             bool suppressBottomHints = false;
             std::string activeShopUrl;
             bool catalogCacheValid = false;
@@ -90,6 +89,9 @@ namespace inst::ui {
             std::vector<std::string> descriptionOverlayLines;
             int descriptionOverlayOffset = 0;
             int descriptionOverlayVisibleLines = 16;
+            bool returnFadeActive = false;
+            u64 returnFadeStartTick = 0;
+            u64 returnFadeDurationTicks = 0;
             struct IconDownloadRequest {
                 std::uint64_t generation = 0;
                 std::string key;
@@ -178,6 +180,7 @@ namespace inst::ui {
             TextBlock::Ref descriptionOverlayTitleText;
             TextBlock::Ref descriptionOverlayBodyText;
             TextBlock::Ref descriptionOverlayHintText;
+            Rectangle::Ref returnFadeRect;
             Rectangle::Ref saveVersionSelectorRect;
             TextBlock::Ref saveVersionSelectorTitleText;
             TextBlock::Ref saveVersionSelectorDetailText;
@@ -236,6 +239,8 @@ namespace inst::ui {
             void scrollDescriptionOverlay(int delta);
             void refreshDescriptionOverlayBody();
             void updateDescriptionPanel();
+            void startReturnFade();
+            void updateReturnFade();
             void refreshAfterInstall();
             void resetIconDownloadState();
             void queueIconDownload(const shopInstStuff::ShopItem& item, const std::string& filePath);

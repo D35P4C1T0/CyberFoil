@@ -19,6 +19,8 @@ namespace inst::config {
 #else
     static const std::string appVersionFull = std::string(APP_VERSION);
 #endif
+    static const std::string appVersionDisplay = appVersionFull
+        + ((appGitMeta.empty() || appVersionFull.find(appGitMeta) != std::string::npos) ? "" : ("\n" + appGitMeta));
 
     extern std::string gAuthKey;
     extern std::string lastNetUrl;

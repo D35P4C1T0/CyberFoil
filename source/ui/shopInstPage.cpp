@@ -893,11 +893,11 @@ namespace inst::ui {
         this->botRect = Rectangle::New(0, 660, 1280, 60, botColor);
         if (inst::config::gayMode) {
             this->titleImage = Image::New(-113, -8, "romfs:/images/logo.png");
-            this->appVersionText = TextBlock::New(367, 29, "v" + inst::config::appVersion + (inst::config::appGitMeta.empty() ? "" : ("\n" + inst::config::appGitMeta)), 22);
+            this->appVersionText = TextBlock::New(367, 29, "v" + inst::config::appVersionDisplay, 22);
         }
         else {
             this->titleImage = Image::New(0, -8, "romfs:/images/logo.png");
-            this->appVersionText = TextBlock::New(480, 29, "v" + inst::config::appVersion + (inst::config::appGitMeta.empty() ? "" : ("\n" + inst::config::appGitMeta)), 22);
+            this->appVersionText = TextBlock::New(480, 29, "v" + inst::config::appVersionDisplay, 22);
         }
         this->appVersionText->SetColor(COLOR("#FFFFFFFF"));
         this->timeText = TextBlock::New(0, 18, "--:--", 22);
@@ -1020,6 +1020,8 @@ namespace inst::ui {
         this->descriptionOverlayHintText = TextBlock::New(46, 618, "B Close    Up/Down Scroll", 18);
         this->descriptionOverlayHintText->SetColor(COLOR("#FFFFFFFF"));
         this->descriptionOverlayHintText->SetVisible(false);
+        this->returnFadeRect = Rectangle::New(0, 0, 1280, 720, COLOR("#00000000"));
+        this->returnFadeRect->SetVisible(false);
         this->saveVersionSelectorRect = Rectangle::New(90, 96, 1100, 548, inst::config::oledMode ? COLOR("#000000EE") : COLOR("#170909EE"));
         this->saveVersionSelectorRect->SetVisible(false);
         this->saveVersionSelectorTitleText = TextBlock::New(114, 112, "", 24);
@@ -1104,6 +1106,7 @@ namespace inst::ui {
         this->Add(this->saveVersionSelectorMenu);
         this->Add(this->saveVersionSelectorDetailText);
         this->Add(this->saveVersionSelectorHintText);
+        this->Add(this->returnFadeRect);
         this->iconDownloadThread = std::thread([this]() {
             this->iconDownloadThreadMain();
         });
@@ -3597,7 +3600,10 @@ namespace inst::ui {
             return;
         }
 
-        this->drawMenuItems(false);
+        if (this->menu->GetItems().size() == this->visibleItems.size())
+            this->refreshListSelectionIcons();
+        else
+            this->drawMenuItems(false);
     }
 
     void shopInstPage::updateRememberedSelection() {
@@ -3611,11 +3617,13 @@ namespace inst::ui {
         this->nativeDlcSectionPresent = false;
         this->saveSyncEnabled = false;
         this->saveSyncLoaded = false;
-        this->pendingMotdFetch = false;
         this->descriptionVisible = false;
         this->descriptionOverlayVisible = false;
         this->descriptionOverlayLines.clear();
         this->descriptionOverlayOffset = 0;
+        this->returnFadeActive = false;
+        this->returnFadeStartTick = 0;
+        this->returnFadeDurationTicks = 0;
         this->saveVersionSelectorVisible = false;
         this->saveVersionSelectorTitleId = 0;
         this->saveVersionSelectorLocalAvailable = false;
@@ -3638,6 +3646,7 @@ namespace inst::ui {
         this->descriptionOverlayTitleText->SetVisible(false);
         this->descriptionOverlayBodyText->SetVisible(false);
         this->descriptionOverlayHintText->SetVisible(false);
+        this->returnFadeRect->SetVisible(false);
         this->saveVersionSelectorRect->SetVisible(false);
         this->saveVersionSelectorTitleText->SetVisible(false);
         this->saveVersionSelectorMenu->SetVisible(false);
@@ -3692,6 +3701,7 @@ namespace inst::ui {
         this->activeShopUrl = shopUrl;
 
         std::string error;
+        std::string motd;
         bool usedLegacyFallback = false;
         int loadingPercent = 5;
         auto updateLoadingProgress = [&](int percent, const char* stage = nullptr, bool forceRender = false) {
@@ -3954,6 +3964,8 @@ namespace inst::ui {
                 this->shopSections.push_back(std::move(saveSection));
             }
         }
+        updateLoadingProgress(99, "Fetching welcome message...");
+        motd = shopInstStuff::FetchShopMotd(this->activeShopUrl, inst::config::shopUser, inst::config::shopPass);
         updateLoadingProgress(99, "Finalizing shop...");
         this->setLoadingProgressStage("Shop ready");
         this->setLoadingProgress(100, true);
@@ -3986,7 +3998,9 @@ namespace inst::ui {
             this->menu->SetVisible(true);
             this->updatePreview();
         }
-        this->pendingMotdFetch = true;
+        mainApp->CallForRender();
+        if (!motd.empty())
+            mainApp->CreateShowDialog("inst.shop.motd_title"_lang, motd, {"common.ok"_lang}, true);
     }
 
     void shopInstPage::refreshAfterInstall() {
@@ -4040,6 +4054,7 @@ namespace inst::ui {
             this->updatePreview();
         }
         this->updateDescriptionPanel();
+        this->startReturnFade();
         mainApp->CallForRender();
     }
 
@@ -4209,6 +4224,7 @@ namespace inst::ui {
     }
 
     void shopInstPage::onInput(u64 Down, u64 Up, u64 Held, pu::ui::Touch Pos) {
+        this->updateReturnFade();
         int bottomTapX = 0;
         if (DetectBottomHintTap(Pos, this->bottomHintTouch, 668, 52, bottomTapX)) {
             Down |= FindBottomHintButton(this->bottomHintSegments, bottomTapX);
@@ -4238,13 +4254,6 @@ namespace inst::ui {
         }
         if (this->handleSaveVersionSelectorInput(Down, Up, Held, Pos))
             return;
-        if (this->pendingMotdFetch && Down == 0 && Up == 0 && Held == 0 && Pos.IsEmpty()) {
-            this->pendingMotdFetch = false;
-            std::string motd = shopInstStuff::FetchShopMotd(this->activeShopUrl, inst::config::shopUser, inst::config::shopPass);
-            if (!motd.empty())
-                mainApp->CreateShowDialog("inst.shop.motd_title"_lang, motd, {"common.ok"_lang}, true);
-            return;
-        }
         if (Down & HidNpadButton_B) {
             this->updateRememberedSelection();
             mainApp->LoadLayout(mainApp->mainPage);
@@ -4956,6 +4965,42 @@ namespace inst::ui {
         this->descriptionText->SetText(title + "\n" + wrapped);
         this->descriptionRect->SetVisible(true);
         this->descriptionText->SetVisible(true);
+    }
+
+    void shopInstPage::startReturnFade() {
+        const u64 freq = armGetSystemTickFreq();
+        this->returnFadeDurationTicks = (freq > 0) ? ((freq * 240) / 1000) : 0;
+        this->returnFadeStartTick = armGetSystemTick();
+        this->returnFadeActive = true;
+        pu::ui::Color fadeColor = COLOR("#000000FF");
+        fadeColor.A = 255;
+        this->returnFadeRect->SetColor(fadeColor);
+        this->returnFadeRect->SetVisible(true);
+    }
+
+    void shopInstPage::updateReturnFade() {
+        if (!this->returnFadeActive)
+            return;
+
+        if (this->returnFadeDurationTicks == 0) {
+            this->returnFadeActive = false;
+            this->returnFadeRect->SetVisible(false);
+            return;
+        }
+
+        const u64 now = armGetSystemTick();
+        const u64 elapsed = (now > this->returnFadeStartTick) ? (now - this->returnFadeStartTick) : 0;
+        if (elapsed >= this->returnFadeDurationTicks) {
+            this->returnFadeActive = false;
+            this->returnFadeRect->SetVisible(false);
+            return;
+        }
+
+        const int alpha = 255 - static_cast<int>((elapsed * 255ULL) / this->returnFadeDurationTicks);
+        pu::ui::Color fadeColor = COLOR("#000000FF");
+        fadeColor.A = static_cast<u8>(alpha < 0 ? 0 : alpha);
+        this->returnFadeRect->SetColor(fadeColor);
+        this->returnFadeRect->SetVisible(true);
     }
 
     void shopInstPage::setButtonsText(const std::string& text) {

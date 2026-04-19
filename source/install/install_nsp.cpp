@@ -23,55 +23,52 @@ SOFTWARE.
 #include "install/install_nsp.hpp"
 
 #include <machine/endian.h>
-#include <thread>
 
-#include "install/nca.hpp"
-#include "install/package_install_helper.hpp"
+#include "install/content_file.hpp"
 #include "nx/fs.hpp"
-#include "nx/ncm.hpp"
-#include "util/file_util.hpp"
-#include "util/debug.h"
 
 namespace tin::install::nsp
 {
+    namespace
+    {
+        std::vector<tin::install::PackageCollectionEntry> BuildCollections(const std::shared_ptr<NSP>& remoteNSP)
+        {
+            remoteNSP->RetrieveHeader();
+
+            std::vector<tin::install::PackageCollectionEntry> collections;
+            const auto* baseHeader = remoteNSP->GetBaseHeader();
+            collections.reserve(baseHeader->numFiles);
+
+            const u64 dataOffset = remoteNSP->GetDataOffset();
+            for (u32 i = 0; i < baseHeader->numFiles; i++)
+            {
+                const auto* fileEntry = remoteNSP->GetFileEntry(i);
+                tin::install::PackageCollectionEntry entry;
+                entry.fileName = remoteNSP->GetFileEntryName(fileEntry);
+                entry.dataOffset = dataOffset + fileEntry->dataOffset;
+                entry.fileSize = fileEntry->fileSize;
+                entry.contentInfo = tin::install::ClassifyContentFile(entry.fileName);
+                collections.push_back(std::move(entry));
+            }
+
+            return collections;
+        }
+    }
+
     NSPInstall::NSPInstall(NcmStorageId destStorageId, bool ignoreReqFirmVersion, const std::shared_ptr<NSP>& remoteNSP) :
-        Install(destStorageId, ignoreReqFirmVersion), m_NSP(remoteNSP)
-    {
-        m_NSP->RetrieveHeader();
-    }
-
-    std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> NSPInstall::ReadCNMT()
-    {
-        return tin::install::ReadCnmtFromPackage(*m_NSP, m_destStorageId, [this](const NcmContentId& ncaId) {
-            this->InstallNCA(ncaId);
-        });
-    }
-
-    void NSPInstall::InstallNCA(const NcmContentId& ncaId)
-    {
-        const PFS0FileEntry* fileEntry = m_NSP->GetFileEntryByNcaId(ncaId);
-        tin::install::PackageNcaEntryInfo entryInfo{
-            .fileName = m_NSP->GetFileEntryName(fileEntry),
-            .dataOffset = m_NSP->GetDataOffset() + fileEntry->dataOffset,
-            .fileSize = fileEntry->fileSize,
-        };
-        tin::install::InstallNcaFromPackage(
-            ncaId,
-            entryInfo,
-            m_destStorageId,
-            m_declinedValidation,
-            [this](void* buf, u64 offset, size_t size) {
-                m_NSP->BufferData(buf, offset, size);
+        tin::install::CollectionInstall(
+            destStorageId,
+            ignoreReqFirmVersion,
+            BuildCollections(remoteNSP),
+            [remoteNSP](void* buf, u64 offset, size_t size) {
+                remoteNSP->BufferData(buf, offset, size);
             },
-            [this](std::shared_ptr<nx::ncm::ContentStorage>& contentStorage, NcmContentId id) {
-                m_NSP->StreamToPlaceholder(contentStorage, id);
-            });
-    }
-
-    void NSPInstall::InstallTicketCert()
+            [remoteNSP](
+                std::shared_ptr<nx::ncm::ContentStorage>& contentStorage,
+                const tin::install::PackageCollectionEntry&,
+                NcmContentId contentId) {
+                remoteNSP->StreamToPlaceholder(contentStorage, contentId);
+            })
     {
-        tin::install::InstallTicketCertFromPackage(*m_NSP, [this](void* buf, u64 dataOffset, size_t size) {
-            m_NSP->BufferData(buf, m_NSP->GetDataOffset() + dataOffset, size);
-        });
     }
 }

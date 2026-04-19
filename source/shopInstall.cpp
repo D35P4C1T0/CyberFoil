@@ -20,6 +20,7 @@
 #include "install/install.hpp"
 #include "install/install_nsp.hpp"
 #include "install/stream_install_helper.hpp"
+#include "install/stream_collection_parser.hpp"
 #include "install/install_xci.hpp"
 #include "nx/nca_writer.h"
 #include "util/file_util.hpp"
@@ -1904,105 +1905,16 @@ namespace shopInstStuff {
             size_t m_cache_end = 0;
         };
 
-        struct StreamHfs0Header {
-            u32 magic;
-            u32 total_files;
-            u32 string_table_size;
-            u32 padding;
-        };
-
-        struct StreamHfs0FileTableEntry {
-            u64 data_offset;
-            u64 data_size;
-            u32 name_offset;
-            u32 hash_size;
-            u64 padding;
-            u8 hash[0x20];
-        };
-
-        struct StreamHfs0 {
-            StreamHfs0Header header{};
-            std::vector<StreamHfs0FileTableEntry> file_table{};
-            std::vector<std::string> string_table{};
-            s64 data_offset{};
-        };
-
-        struct StreamCollectionEntry {
-            std::string name;
-            u64 offset{};
-            u64 size{};
-        };
-
-        static bool ReadHfs0Partition(HttpStreamSource& source, s64 off, StreamHfs0& out) {
-            u64 bytes_read = 0;
-            if (R_FAILED(source.Read(&out.header, off, sizeof(out.header), &bytes_read))) return false;
-            if (out.header.magic != 0x30534648) return false;
-            if (out.header.total_files == 0 || out.header.total_files > 0x4000) return false;
-            if (out.header.string_table_size > (256 * 1024)) return false;
-            off += bytes_read;
-
-            out.file_table.resize(out.header.total_files);
-            const auto file_table_size = static_cast<s64>(out.file_table.size() * sizeof(StreamHfs0FileTableEntry));
-            if (file_table_size > (4 * 1024 * 1024)) return false;
-            if (R_FAILED(source.Read(out.file_table.data(), off, file_table_size, &bytes_read))) return false;
-            off += bytes_read;
-
-            std::vector<char> string_table(out.header.string_table_size);
-            if (R_FAILED(source.Read(string_table.data(), off, string_table.size(), &bytes_read))) return false;
-            off += bytes_read;
-
-            out.string_table.clear();
-            out.string_table.reserve(out.header.total_files);
-            for (u32 i = 0; i < out.header.total_files; i++) {
-                out.string_table.emplace_back(string_table.data() + out.file_table[i].name_offset);
-            }
-
-            out.data_offset = off;
-            return true;
-        }
-
-        static bool GetXciCollections(HttpStreamSource& source, std::vector<StreamCollectionEntry>& out) {
-            StreamHfs0 root{};
-            s64 root_offset = 0xF000;
-            if (!ReadHfs0Partition(source, root_offset, root)) {
-                root_offset = 0x10000;
-                if (!ReadHfs0Partition(source, root_offset, root)) {
-                    return false;
-                }
-            }
-
-            for (u32 i = 0; i < root.header.total_files; i++) {
-                if (root.string_table[i] != "secure") continue;
-
-                StreamHfs0 secure{};
-                const auto secure_offset = root.data_offset + static_cast<s64>(root.file_table[i].data_offset);
-                if (!ReadHfs0Partition(source, secure_offset, secure)) return false;
-
-                out.clear();
-                out.reserve(secure.header.total_files);
-                for (u32 j = 0; j < secure.header.total_files; j++) {
-                    StreamCollectionEntry entry;
-                    entry.name = secure.string_table[j];
-                    entry.offset = static_cast<u64>(secure.data_offset + static_cast<s64>(secure.file_table[j].data_offset));
-                    entry.size = secure.file_table[j].data_size;
-                    out.emplace_back(std::move(entry));
-                }
-                return true;
-            }
-
-            return false;
-        }
-
         static bool InstallXciHttpStream(const std::string& url, NcmStorageId dest_storage) {
             tin::network::HTTPDownload download(url);
             HttpStreamSource source(download);
 
-            std::vector<StreamCollectionEntry> collections;
-            if (!GetXciCollections(source, collections)) return false;
+            std::vector<tin::install::PackageCollectionEntry> collections;
+            if (!tin::install::stream::GetXciSecureCollections(source, collections)) return false;
 
             u64 totalBytes = 0;
             for (const auto& c : collections) {
-                totalBytes += c.size;
+                totalBytes += c.fileSize;
             }
             u64 processedBytes = 0;
             u64 lastTick = armGetSystemTick();
@@ -2012,121 +1924,73 @@ namespace shopInstStuff {
             inst::ui::instPage::setInstBarPerc(0);
 
             std::sort(collections.begin(), collections.end(), [](const auto& a, const auto& b) {
-                return a.offset < b.offset;
+                return a.dataOffset < b.dataOffset;
             });
 
-            struct EntryState {
-                std::string name;
-                NcmContentId nca_id{};
-                std::uint64_t size = 0;
-                std::uint64_t written = 0;
-                bool started = false;
-                bool complete = false;
-                bool is_nca = false;
-                bool is_cnmt = false;
-                bool is_ticket = false;
-                bool is_cert = false;
-                bool has_nca_id = false;
-                std::shared_ptr<nx::ncm::ContentStorage> storage;
-                std::unique_ptr<NcaWriter> nca_writer;
-                std::vector<std::uint8_t> ticket_buf;
-                std::vector<std::uint8_t> cert_buf;
-                std::string pair_base_name;
-            };
-
-            auto ensureStarted = [&](EntryState& entry) {
-                if (entry.started) return true;
-                if (!entry.is_nca) {
-                    entry.started = true;
-                    return true;
-                }
-                entry.storage = std::make_shared<nx::ncm::ContentStorage>(dest_storage);
-                try { entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id); } catch (...) {}
-                entry.nca_writer = std::make_unique<NcaWriter>(entry.nca_id, entry.storage);
-                entry.started = true;
-                return true;
-            };
+            using EntryState = tin::install::StreamingInstallHelper::StreamInstallEntryState;
 
             tin::install::StreamingInstallHelper helper(dest_storage, inst::config::ignoreReqVers);
 
             std::unordered_map<std::string, EntryState> entries;
             entries.reserve(collections.size());
             auto cleanupEntries = [&entries]() {
-                for (auto& [_, entry] : entries) {
-                    if (!entry.is_nca || !entry.storage)
-                        continue;
-                    try {
-                        if (entry.nca_writer)
-                            entry.nca_writer->close();
-                    } catch (...) {}
-                    try { entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id); } catch (...) {}
-                    try {
-                        if (entry.storage->Has(entry.nca_id))
-                            entry.storage->Delete(entry.nca_id);
-                    } catch (...) {}
-                }
+                tin::install::StreamingInstallHelper::CleanupInstallEntries(
+                    entries,
+                    [](auto& map_entry) -> auto& {
+                        return map_entry.second;
+                    });
             };
 
-            std::vector<std::uint8_t> buf(0x800000);
-            for (const auto& collection : collections) {
-                if (inst::ui::instPage::isInstallCancelRequested()) {
-                    cleanupEntries();
-                    THROW_FORMAT("Installation canceled.");
-                }
-                EntryState entry;
-                entry.name = collection.name;
-                entry.size = collection.size;
-                const auto info = tin::install::ClassifyContentFile(entry.name);
-                entry.is_nca = info.is_nca;
-                entry.is_cnmt = info.is_cnmt;
-                entry.is_ticket = info.is_ticket;
-                entry.is_cert = info.is_cert;
-                entry.has_nca_id = info.has_nca_id;
-                entry.nca_id = info.nca_id;
-                entry.pair_base_name = info.pair_base_name;
+            if (!tin::install::StreamingInstallHelper::InstallCollectionSetFromSource<HttpStreamSource, EntryState>(
+                    helper,
+                    source,
+                    collections,
+                    dest_storage,
+                    0x800000,
+                    entries,
+                    [&](const auto&, const auto&) {
+                        if (inst::ui::instPage::isInstallCancelRequested()) {
+                            cleanupEntries();
+                            THROW_FORMAT("Installation canceled.");
+                        }
+                    },
+                    [&](const auto&, const auto&) {
+                        return true;
+                    },
+                    [&](const auto&, auto& entry, u64 bytes_read, u64, u64) {
+                        processedBytes += bytes_read;
 
-                if (!ensureStarted(entry)) return false;
+                        const u64 now = armGetSystemTick();
+                        if (now - lastTick >= (freq / 2)) {
+                            double speed = 0.0;
+                            double speedBytesPerSec = 0.0;
+                            if (processedBytes > lastProcessed) {
+                                double deltaMb = (processedBytes - lastProcessed) / 1000000.0;
+                                double deltaSec = (double)(now - lastTick) / (double)freq;
+                                if (deltaSec > 0.0) {
+                                    speed = deltaMb / deltaSec;
+                                    speedBytesPerSec = (double)(processedBytes - lastProcessed) / deltaSec;
+                                }
+                            }
+                            lastTick = now;
+                            lastProcessed = processedBytes;
 
-                u64 remaining = collection.size;
-                u64 offset = collection.offset;
-                while (remaining > 0) {
-                    if (inst::ui::instPage::isInstallCancelRequested()) {
-                        cleanupEntries();
-                        THROW_FORMAT("Installation canceled.");
-                    }
-                    const auto chunk = static_cast<size_t>(std::min<u64>(remaining, buf.size()));
-                    u64 bytes_read = 0;
-                    if (R_FAILED(source.Read(buf.data(), static_cast<s64>(offset), static_cast<s64>(chunk), &bytes_read))) {
-                        cleanupEntries();
-                        return false;
-                    }
-                    if (bytes_read == 0) {
-                        cleanupEntries();
-                        return false;
-                    }
+                            if (totalBytes > 0) {
+                                int progress = (int)((double)processedBytes / (double)totalBytes * 100.0);
+                                inst::ui::instPage::setInstBarPerc(progress);
 
-                    if (entry.is_ticket) {
-                        entry.ticket_buf.insert(entry.ticket_buf.end(), buf.data(), buf.data() + bytes_read);
-                        entry.written += bytes_read;
-                        if (entry.written >= entry.size) entry.complete = true;
-                    } else if (entry.is_cert) {
-                        entry.cert_buf.insert(entry.cert_buf.end(), buf.data(), buf.data() + bytes_read);
-                        entry.written += bytes_read;
-                        if (entry.written >= entry.size) entry.complete = true;
-                    } else if (entry.is_nca && entry.nca_writer) {
-                        entry.nca_writer->write(buf.data(), bytes_read);
-                        entry.written += bytes_read;
-                        if (entry.written >= entry.size) {
-                            entry.nca_writer->close();
-                            try {
-                                entry.storage->Register(*(NcmPlaceHolderId*)&entry.nca_id, entry.nca_id);
-                                entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id);
-                            } catch (...) {}
-                            entry.complete = true;
-                            if (entry.is_cnmt) {
-                            try {
-                                    helper.CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size);
-                                } catch (...) {}
+                                std::string etaText = "--:--";
+                                if (speedBytesPerSec > 0.0 && processedBytes < totalBytes) {
+                                    const auto etaSeconds = static_cast<std::uint64_t>((double)(totalBytes - processedBytes) / speedBytesPerSec);
+                                    etaText = FormatEta(etaSeconds);
+                                }
+
+                                inst::ui::instPage::setInstInfoText("inst.info_page.downloading"_lang + FormatOneDecimal(speed) + "MB/s");
+                                inst::ui::instPage::setProgressDetailText(
+                                    "Downloaded " + FormatOneDecimal((double)processedBytes / 1000000.0) + " / " +
+                                    FormatOneDecimal((double)totalBytes / 1000000.0) + " MB (" +
+                                    std::to_string(progress) + "%) • ETA " + etaText
+                                );
                             }
                             // Release IPC handles immediately — no longer needed after
                             // Register/CommitLatest. Accumulating these across all NCA
@@ -2134,65 +1998,40 @@ namespace shopInstStuff {
                             entry.nca_writer = nullptr;
                             entry.storage = nullptr;
                         }
-                    }
 
-                    offset += bytes_read;
-                    remaining -= bytes_read;
-                    processedBytes += bytes_read;
-
-                    const u64 now = armGetSystemTick();
-                    if (now - lastTick >= (freq / 2)) {
-                        double speed = 0.0;
-                        double speedBytesPerSec = 0.0;
-                        if (processedBytes > lastProcessed) {
-                            double deltaMb = (processedBytes - lastProcessed) / 1000000.0;
-                            double deltaSec = (double)(now - lastTick) / (double)freq;
-                            if (deltaSec > 0.0) {
-                                speed = deltaMb / deltaSec;
-                                speedBytesPerSec = (double)(processedBytes - lastProcessed) / deltaSec;
-                            }
-                        }
-                        lastTick = now;
-                        lastProcessed = processedBytes;
-
-                        if (totalBytes > 0) {
-                            int progress = (int)((double)processedBytes / (double)totalBytes * 100.0);
-                            inst::ui::instPage::setInstBarPerc(progress);
-
-                            std::string etaText = "--:--";
-                            if (speedBytesPerSec > 0.0 && processedBytes < totalBytes) {
-                                const auto etaSeconds = static_cast<std::uint64_t>((double)(totalBytes - processedBytes) / speedBytesPerSec);
-                                etaText = FormatEta(etaSeconds);
-                            }
-
-                            inst::ui::instPage::setInstInfoText("inst.info_page.downloading"_lang + FormatOneDecimal(speed) + "MB/s");
-                            inst::ui::instPage::setProgressDetailText(
-                                "Downloaded " + FormatOneDecimal((double)processedBytes / 1000000.0) + " / " +
-                                FormatOneDecimal((double)totalBytes / 1000000.0) + " MB (" +
-                                std::to_string(progress) + "%) • ETA " + etaText
-                            );
-                        }
-                    }
-                }
-
-                entries.emplace(entry.name, std::move(entry));
+                        return true;
+                    },
+                    [&](const auto&, const auto&) {
+                        return true;
+                    })) {
+                cleanupEntries();
+                return false;
             }
 
-            for (auto& [name, entry] : entries) {
-                if (inst::ui::instPage::isInstallCancelRequested()) {
-                    cleanupEntries();
-                    THROW_FORMAT("Installation canceled.");
-                }
-                if (entry.is_ticket) {
-                    auto it = entries.find(entry.pair_base_name + ".cert");
-                    if (it != entries.end() && !entry.ticket_buf.empty() && !it->second.cert_buf.empty()) {
-                        ASSERT_OK(esImportTicket(entry.ticket_buf.data(), entry.ticket_buf.size(), it->second.cert_buf.data(), it->second.cert_buf.size()),
-                            "Failed to import ticket");
-                    }
-                }
+            if (inst::ui::instPage::isInstallCancelRequested()) {
+                cleanupEntries();
+                THROW_FORMAT("Installation canceled.");
             }
 
-            helper.CommitAll();
+            if (!tin::install::StreamingInstallHelper::FinalizeInstallEntries(
+                    helper,
+                    entries,
+                    [](const auto& map_entry) -> const auto& {
+                        return map_entry.second;
+                    },
+                    [](const std::string&, Result rc) {
+                        ASSERT_OK(rc, "Failed to import ticket");
+                        return false;
+                    },
+                    [](const char* message) {
+                        if (message != nullptr) {
+                            THROW_FORMAT(message);
+                        }
+                        THROW_FORMAT("Failed to commit streamed install metadata");
+                    })) {
+                cleanupEntries();
+                return false;
+            }
             inst::ui::instPage::setInstBarPerc(100);
             inst::ui::instPage::setProgressDetailText("Downloaded 100% • Verifying and installing...");
             return true;
@@ -2335,4 +2174,3 @@ namespace shopInstStuff {
         inst::util::deinitInstallServices();
     }
 }
-

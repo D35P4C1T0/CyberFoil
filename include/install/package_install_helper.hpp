@@ -38,12 +38,51 @@ SOFTWARE.
 
 namespace tin::install
 {
+    struct PackageCollectionEntry
+    {
+        std::string fileName;
+        u64 dataOffset = 0;
+        u64 fileSize = 0;
+        ContentFileInfo contentInfo{};
+    };
+
     struct PackageNcaEntryInfo
     {
         std::string fileName;
         u64 dataOffset = 0;
         u64 fileSize = 0;
     };
+
+    using BufferDataFunction = std::function<void(void* buf, u64 offset, size_t size)>;
+    using StreamCollectionToPlaceholderFunction = std::function<void(
+        std::shared_ptr<nx::ncm::ContentStorage>& contentStorage,
+        const PackageCollectionEntry& entry,
+        NcmContentId ncaId)>;
+    using InstallCollectionNcaFunction = std::function<void(
+        const PackageCollectionEntry& entry,
+        const NcmContentId& ncaId)>;
+
+    const PackageCollectionEntry* FindCollectionEntryByNcaId(
+        const std::vector<PackageCollectionEntry>& collections,
+        const NcmContentId& ncaId);
+
+    void InstallNcaFromCollection(
+        const NcmContentId& ncaId,
+        const PackageCollectionEntry& entryInfo,
+        NcmStorageId destStorageId,
+        bool& declinedValidation,
+        const BufferDataFunction& bufferData,
+        const StreamCollectionToPlaceholderFunction& streamToPlaceholder,
+        const std::function<void()>& afterStream = {});
+
+    std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> ReadCnmtFromCollections(
+        const std::vector<PackageCollectionEntry>& collections,
+        NcmStorageId destStorageId,
+        const InstallCollectionNcaFunction& installNca);
+
+    void InstallTicketCertFromCollections(
+        const std::vector<PackageCollectionEntry>& collections,
+        const BufferDataFunction& bufferData);
 
     void InstallNcaFromPackage(
         const NcmContentId& ncaId,

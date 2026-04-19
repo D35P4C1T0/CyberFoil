@@ -54,14 +54,16 @@ INCLUDES	:=	include include/ui include/data include/install include/nx include/n
 APP_TITLE	:=	CyberFoil
 APP_AUTHOR	:=	luketanti
 APP_VERSION	:=	1.4.3
+RELEASE ?= 1
+DEV ?= 0
+GIT_BRANCH := $(shell if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then branch=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null); if [ -z "$$branch" ] || [ "$$branch" = "HEAD" ]; then echo detached; else echo "$$branch" | tr '/' '-'; fi; else echo nogit; fi)
 GIT_COMMIT	:=	$(shell if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then git rev-parse --short=8 HEAD 2>/dev/null; elif [ -n "$$GITHUB_SHA" ]; then printf "%s" "$$GITHUB_SHA" | cut -c1-8; else echo nogit; fi)
 GIT_STATUS	:=	$(shell if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then if git diff --quiet --ignore-submodules HEAD -- 2>/dev/null && git diff --cached --quiet --ignore-submodules HEAD -- 2>/dev/null; then echo clean; else echo dirty; fi; elif [ -n "$$GITHUB_ACTIONS" ]; then echo clean; else echo nogit; fi)
-ifeq ($(RELEASE),1)
 APP_GIT_META :=
-APP_VERSION_FULL := $(APP_VERSION)
+ifeq ($(DEV),1)
+APP_VERSION_FULL := $(APP_VERSION)-$(GIT_BRANCH)
 else
-APP_GIT_META := $(GIT_COMMIT).$(GIT_STATUS)
-APP_VERSION_FULL := $(APP_VERSION)+$(GIT_COMMIT).$(GIT_STATUS)
+APP_VERSION_FULL := $(APP_VERSION)
 endif
 ICON		:=	romfs/images/icon.jpg
 ROMFS		:=	romfs
@@ -211,10 +213,16 @@ ifneq ($(ROMFS),)
 	export NROFLAGS += --romfsdir=$(CURDIR)/$(ROMFS)
 endif
 
-.PHONY: $(BUILD) clean all
+.PHONY: $(BUILD) clean all dev release
 
 #---------------------------------------------------------------------------------
 all: $(BUILD)
+
+dev:
+	@$(MAKE) --no-print-directory all RELEASE=0 DEV=1
+
+release:
+	@$(MAKE) --no-print-directory all RELEASE=1 DEV=0
 
 $(BUILD):
 	@[ -d $@ ] || mkdir -p $@

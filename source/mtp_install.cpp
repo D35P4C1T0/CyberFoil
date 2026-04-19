@@ -27,6 +27,7 @@
 #include "install/nca.hpp"
 #include "install/pfs0_parser.hpp"
 #include "install/stream_install_helper.hpp"
+#include "install/stream_collection_parser.hpp"
 #include "install/hfs0.hpp"
 #include "data/byte_buffer.hpp"
 #include "nx/nca_writer.h"
@@ -124,30 +125,13 @@ public:
     bool Finalize() override;
 
 private:
-    struct EntryState {
-        std::string name;
-        NcmContentId nca_id{};
+    struct EntryState : tin::install::StreamingInstallHelper::StreamInstallEntryState {
         std::uint64_t data_offset = 0;
-        std::uint64_t size = 0;
-        std::uint64_t written = 0;
-        bool started = false;
-        bool complete = false;
-        bool is_nca = false;
-        bool is_cnmt = false;
-        bool is_ticket = false;
-        bool is_cert = false;
-        bool has_nca_id = false;
-        std::shared_ptr<nx::ncm::ContentStorage> storage;
-        std::unique_ptr<NcaWriter> nca_writer;
-        std::vector<std::uint8_t> ticket_buf;
-        std::vector<std::uint8_t> cert_buf;
-        std::string pair_base_name;
     };
 
     bool ParseHeaderIfReady();
     bool EnsureEntryStarted(EntryState& entry);
     bool WriteEntryData(EntryState& entry, const std::uint8_t* data, size_t size, std::uint64_t rel_offset);
-    bool CommitCnmt(EntryState& entry);
 
     NcmStorageId m_dest_storage = NcmStorageId_SdCard;
     std::uint64_t m_total_size = 0;
@@ -208,20 +192,15 @@ bool MtpNspStream::ParseHeaderIfReady()
     m_hint_index = 0;
     for (u32 i = 0; i < base->numFiles; i++) {
         const auto* entry = m_header.GetFileEntry(i);
-        const char* name = m_header.GetFileEntryName(entry);
+        tin::install::PackageCollectionEntry collection;
+        collection.fileName = m_header.GetFileEntryName(entry);
+        collection.dataOffset = header_size + entry->dataOffset;
+        collection.fileSize = entry->fileSize;
+        collection.contentInfo = tin::install::ClassifyContentFile(collection.fileName);
 
         EntryState st;
-        st.name = name;
-        st.data_offset = header_size + entry->dataOffset;
-        st.size = entry->fileSize;
-        const auto info = tin::install::ClassifyContentFile(st.name);
-        st.is_nca = info.is_nca;
-        st.is_cnmt = info.is_cnmt;
-        st.is_ticket = info.is_ticket;
-        st.is_cert = info.is_cert;
-        st.has_nca_id = info.has_nca_id;
-        st.nca_id = info.nca_id;
-        st.pair_base_name = info.pair_base_name;
+        st.data_offset = collection.dataOffset;
+        tin::install::StreamingInstallHelper::PopulateEntryStateFromCollection(st, collection);
         m_entries.emplace_back(std::move(st));
     }
     std::sort(m_entries.begin(), m_entries.end(), [](const EntryState& a, const EntryState& b) {
@@ -240,43 +219,13 @@ bool MtpNspStream::ParseHeaderIfReady()
 
 bool MtpNspStream::EnsureEntryStarted(EntryState& entry)
 {
-    if (entry.started) return true;
-    if (!entry.is_nca) {
-        entry.started = true;
-        return true;
-    }
-
-    entry.storage = std::make_shared<nx::ncm::ContentStorage>(m_dest_storage);
-    try {
-        entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id);
-    } catch (...) {}
-    entry.nca_writer = std::make_unique<NcaWriter>(entry.nca_id, entry.storage);
-    entry.started = true;
+    if (!tin::install::StreamingInstallHelper::EnsureEntryStarted(entry, m_dest_storage))
+        return false;
     StreamTrace("NSP EntryStart name='%s' size=%llu cnmt=%d",
         entry.name.c_str(),
         static_cast<unsigned long long>(entry.size),
         entry.is_cnmt ? 1 : 0);
     return true;
-}
-
-bool MtpNspStream::CommitCnmt(EntryState& entry)
-{
-    if (!entry.is_cnmt || !entry.storage) return false;
-
-    try {
-        u64 baseTitleId = 0;
-        if (!m_helper->CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size, &baseTitleId))
-            throw std::runtime_error("Failed to commit CNMT");
-
-        g_stream_title_id.store(baseTitleId, std::memory_order_relaxed);
-        StreamTrace("NSP CommitCnmt ok name='%s' size=%llu",
-            entry.name.c_str(),
-            static_cast<unsigned long long>(entry.size));
-        return true;
-    } catch (...) {
-        StreamTrace("NSP CommitCnmt fail name='%s'", entry.name.c_str());
-        return false;
-    }
 }
 
 bool MtpNspStream::WriteEntryData(EntryState& entry, const std::uint8_t* data, size_t size, std::uint64_t rel_offset)
@@ -301,45 +250,18 @@ bool MtpNspStream::WriteEntryData(EntryState& entry, const std::uint8_t* data, s
         }
     }
 
-    if (entry.is_ticket) {
-        entry.ticket_buf.insert(entry.ticket_buf.end(), data, data + size);
-        entry.written += size;
-        if (entry.written >= entry.size) {
-            entry.complete = true;
-        }
-        return true;
-    }
-    if (entry.is_cert) {
-        entry.cert_buf.insert(entry.cert_buf.end(), data, data + size);
-        entry.written += size;
-        if (entry.written >= entry.size) {
-            entry.complete = true;
-        }
-        return true;
-    }
-
-    if (!entry.is_nca) {
-        // Non-NCA metadata payloads (eg xml) are not needed by installer logic.
-        entry.written += size;
-        if (entry.written >= entry.size) {
-            entry.complete = true;
-        }
-        return true;
-    }
-
-    if (!entry.nca_writer) return false;
-    entry.nca_writer->write(data, size);
-    entry.written += size;
-    if (entry.written >= entry.size) {
-        entry.nca_writer->close();
-        try {
-            entry.storage->Register(*(NcmPlaceHolderId*)&entry.nca_id, entry.nca_id);
-            entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id);
-        } catch (...) {}
-        entry.complete = true;
-        if (entry.is_cnmt) {
-            CommitCnmt(entry);
-        }
+    u64 baseTitleId = 0;
+    if (!tin::install::StreamingInstallHelper::WriteSequentialEntryData(entry, data, size, m_helper.get(), &baseTitleId))
+        return false;
+    if (entry.complete && entry.is_cnmt && baseTitleId != 0) {
+        g_stream_title_id.store(baseTitleId, std::memory_order_relaxed);
+        StreamTrace("NSP CommitCnmt ok name='%s' size=%llu",
+            entry.name.c_str(),
+            static_cast<unsigned long long>(entry.size));
+        StreamTrace("NSP EntryComplete name='%s' size=%llu",
+            entry.name.c_str(),
+            static_cast<unsigned long long>(entry.size));
+    } else if (entry.complete) {
         StreamTrace("NSP EntryComplete name='%s' size=%llu",
             entry.name.c_str(),
             static_cast<unsigned long long>(entry.size));
@@ -436,53 +358,26 @@ bool MtpNspStream::Finalize()
     StreamTrace("NSP Finalize begin entries=%zu", m_entries.size());
     bool ok = true;
 
-    std::unordered_map<std::string, std::vector<std::uint8_t>> tickets_by_base;
-    std::unordered_map<std::string, std::vector<std::uint8_t>> certs_by_base;
-    for (const auto& entry : m_entries) {
-        if (entry.is_ticket)
-            tickets_by_base[entry.pair_base_name] = entry.ticket_buf;
-        if (entry.is_cert)
-            certs_by_base[entry.pair_base_name] = entry.cert_buf;
-    }
-
-    std::unordered_set<std::string> base_names;
-    base_names.reserve(tickets_by_base.size() + certs_by_base.size());
-    for (const auto& entry : tickets_by_base) {
-        base_names.insert(entry.first);
-    }
-    for (const auto& entry : certs_by_base) {
-        base_names.insert(entry.first);
-    }
-
-    for (const auto& base : base_names) {
-        const auto tik_it = tickets_by_base.find(base);
-        const auto cert_it = certs_by_base.find(base);
-        if (tik_it == tickets_by_base.end() || cert_it == certs_by_base.end()) {
-            continue;
-        }
-        if (!tik_it->second.empty() && !cert_it->second.empty()) {
-            const Result rc = esImportTicket(
-                tik_it->second.data(), tik_it->second.size(),
-                cert_it->second.data(), cert_it->second.size());
-            if (R_FAILED(rc)) {
-                LOG_DEBUG("MTP finalize: ticket import failed (0x%08x)\n", rc);
-                StreamTrace("NSP Finalize ticket import fail base='%s' rc=0x%08x", base.c_str(), rc);
-                ok = false;
+    ok = tin::install::StreamingInstallHelper::FinalizeInstallEntries(
+        *m_helper,
+        m_entries,
+        [](const auto& entry) -> const auto& {
+            return entry;
+        },
+        [&](const std::string& base, Result rc) {
+            LOG_DEBUG("MTP finalize: ticket import failed (0x%08x)\n", rc);
+            StreamTrace("NSP Finalize ticket import fail base='%s' rc=0x%08x", base.c_str(), rc);
+            return true;
+        },
+        [&](const char* message) {
+            if (message != nullptr) {
+                LOG_DEBUG("MTP finalize: CommitAll failed: %s\n", message);
+                StreamTrace("NSP Finalize CommitAll exception='%s'", message);
+            } else {
+                LOG_DEBUG("MTP finalize: CommitAll failed with unknown exception\n");
+                StreamTrace("NSP Finalize CommitAll unknown exception");
             }
-        }
-    }
-
-    try {
-        m_helper->CommitAll();
-    } catch (const std::exception& e) {
-        LOG_DEBUG("MTP finalize: CommitAll failed: %s\n", e.what());
-        StreamTrace("NSP Finalize CommitAll exception='%s'", e.what());
-        ok = false;
-    } catch (...) {
-        LOG_DEBUG("MTP finalize: CommitAll failed with unknown exception\n");
-        StreamTrace("NSP Finalize CommitAll unknown exception");
-        ok = false;
-    }
+        });
     StreamTrace("NSP Finalize end ok=%d", ok ? 1 : 0);
     return ok;
 }
@@ -603,92 +498,6 @@ private:
     s64 m_offset = 0;
 };
 
-struct StreamHfs0Header {
-    u32 magic;
-    u32 total_files;
-    u32 string_table_size;
-    u32 padding;
-};
-
-struct StreamHfs0FileTableEntry {
-    u64 data_offset;
-    u64 data_size;
-    u32 name_offset;
-    u32 hash_size;
-    u64 padding;
-    u8 hash[0x20];
-};
-
-struct StreamHfs0 {
-    StreamHfs0Header header{};
-    std::vector<StreamHfs0FileTableEntry> file_table{};
-    std::vector<std::string> string_table{};
-    s64 data_offset{};
-};
-
-struct StreamCollectionEntry {
-    std::string name;
-    u64 offset{};
-    u64 size{};
-};
-
-static bool ReadHfs0Partition(MtpStreamSource& source, s64 off, StreamHfs0& out) {
-    u64 bytes_read = 0;
-    if (R_FAILED(source.Read(&out.header, off, sizeof(out.header), &bytes_read))) return false;
-    if (out.header.magic != 0x30534648) return false;
-    off += bytes_read;
-
-    out.file_table.resize(out.header.total_files);
-    const auto file_table_size = static_cast<s64>(out.file_table.size() * sizeof(StreamHfs0FileTableEntry));
-    if (R_FAILED(source.Read(out.file_table.data(), off, file_table_size, &bytes_read))) return false;
-    off += bytes_read;
-
-    std::vector<char> string_table(out.header.string_table_size);
-    if (R_FAILED(source.Read(string_table.data(), off, string_table.size(), &bytes_read))) return false;
-    off += bytes_read;
-
-    out.string_table.clear();
-    out.string_table.reserve(out.header.total_files);
-    for (u32 i = 0; i < out.header.total_files; i++) {
-        out.string_table.emplace_back(string_table.data() + out.file_table[i].name_offset);
-    }
-
-    out.data_offset = off;
-    return true;
-}
-
-static bool GetXciCollections(MtpStreamSource& source, std::vector<StreamCollectionEntry>& out) {
-    StreamHfs0 root{};
-    s64 root_offset = 0xF000;
-    if (!ReadHfs0Partition(source, root_offset, root)) {
-        root_offset = 0x10000;
-        if (!ReadHfs0Partition(source, root_offset, root)) {
-            return false;
-        }
-    }
-
-    for (u32 i = 0; i < root.header.total_files; i++) {
-        if (root.string_table[i] != "secure") continue;
-
-        StreamHfs0 secure{};
-        const auto secure_offset = root.data_offset + static_cast<s64>(root.file_table[i].data_offset);
-        if (!ReadHfs0Partition(source, secure_offset, secure)) return false;
-
-        out.clear();
-        out.reserve(secure.header.total_files);
-        for (u32 j = 0; j < secure.header.total_files; j++) {
-            StreamCollectionEntry entry;
-            entry.name = secure.string_table[j];
-            entry.offset = static_cast<u64>(secure.data_offset + static_cast<s64>(secure.file_table[j].data_offset));
-            entry.size = secure.file_table[j].data_size;
-            out.emplace_back(std::move(entry));
-        }
-        return true;
-    }
-
-    return false;
-}
-
 class MtpXciStreamPull final : public StreamInstaller {
 public:
     explicit MtpXciStreamPull(std::uint64_t total_size, NcmStorageId dest_storage)
@@ -757,188 +566,86 @@ public:
     }
 
 private:
-    struct EntryState {
-        std::string name;
-        NcmContentId nca_id{};
-        std::uint64_t size = 0;
-        std::uint64_t written = 0;
-        bool started = false;
-        bool complete = false;
-        bool is_nca = false;
-        bool is_cnmt = false;
-        bool is_ticket = false;
-        bool is_cert = false;
-        bool has_nca_id = false;
-        std::shared_ptr<nx::ncm::ContentStorage> storage;
-        std::unique_ptr<NcaWriter> nca_writer;
-        std::vector<std::uint8_t> ticket_buf;
-        std::vector<std::uint8_t> cert_buf;
-        std::string pair_base_name;
-    };
+    using EntryState = tin::install::StreamingInstallHelper::StreamInstallEntryState;
 
     bool EnsureEntryStarted(EntryState& entry) {
-        if (entry.started) return true;
-        if (!entry.is_nca) {
-            entry.started = true;
-            return true;
-        }
-
-        entry.storage = std::make_shared<nx::ncm::ContentStorage>(m_dest_storage);
-        try {
-            entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id);
-        } catch (...) {}
-        entry.nca_writer = std::make_unique<NcaWriter>(entry.nca_id, entry.storage);
-        entry.started = true;
-        return true;
-    }
-
-    bool CommitCnmt(EntryState& entry) {
-        if (!entry.is_cnmt || !entry.storage) return false;
-
-        try {
-            u64 baseTitleId = 0;
-            if (!m_helper->CommitInstalledCnmt(entry.storage, entry.nca_id, entry.size, &baseTitleId))
-                throw std::runtime_error("Failed to commit CNMT");
-
-            g_stream_title_id.store(baseTitleId, std::memory_order_relaxed);
-            return true;
-        } catch (...) {
-            return false;
-        }
+        return tin::install::StreamingInstallHelper::EnsureEntryStarted(entry, m_dest_storage);
     }
 
     bool WriteEntryData(EntryState& entry, const std::uint8_t* data, size_t size) {
-        if (entry.is_ticket) {
-            entry.ticket_buf.insert(entry.ticket_buf.end(), data, data + size);
-            entry.written += size;
-            if (entry.written >= entry.size) {
-                entry.complete = true;
-            }
-            return true;
-        }
-        if (entry.is_cert) {
-            entry.cert_buf.insert(entry.cert_buf.end(), data, data + size);
-            entry.written += size;
-            if (entry.written >= entry.size) {
-                entry.complete = true;
-            }
-            return true;
-        }
-
-        if (!entry.is_nca || !entry.nca_writer) return false;
-        entry.nca_writer->write(data, size);
-        entry.written += size;
-        if (entry.written >= entry.size) {
-            entry.nca_writer->close();
-            try {
-                entry.storage->Register(*(NcmPlaceHolderId*)&entry.nca_id, entry.nca_id);
-                entry.storage->DeletePlaceholder(*(NcmPlaceHolderId*)&entry.nca_id);
-            } catch (...) {}
-            entry.complete = true;
-            if (entry.is_cnmt) {
-                CommitCnmt(entry);
-            }
-        }
-        return true;
+        return tin::install::StreamingInstallHelper::WriteSequentialEntryData(entry, data, size, m_helper.get());
     }
 
     bool InstallFromSource(MtpStreamSource& source) {
-        std::vector<StreamCollectionEntry> collections;
-        if (!GetXciCollections(source, collections)) {
+        std::vector<tin::install::PackageCollectionEntry> collections;
+        if (!tin::install::stream::GetXciSecureCollections(source, collections)) {
             StreamTrace("XCI InstallFromSource GetXciCollections failed");
             return false;
         }
         StreamTrace("XCI InstallFromSource collections=%zu", collections.size());
 
         std::sort(collections.begin(), collections.end(), [](const auto& a, const auto& b) {
-            return a.offset < b.offset;
+            return a.dataOffset < b.dataOffset;
         });
 
         std::unordered_map<std::string, EntryState> entries;
         entries.reserve(collections.size());
-        std::vector<std::uint8_t> buf(0x400000);
 
-        for (const auto& collection : collections) {
-            EntryState entry;
-            entry.name = collection.name;
-            entry.size = collection.size;
-            const auto info = tin::install::ClassifyContentFile(entry.name);
-            entry.is_nca = info.is_nca;
-            entry.is_cnmt = info.is_cnmt;
-            entry.is_ticket = info.is_ticket;
-            entry.is_cert = info.is_cert;
-            entry.has_nca_id = info.has_nca_id;
-            entry.nca_id = info.nca_id;
-            entry.pair_base_name = info.pair_base_name;
-
-            if (!EnsureEntryStarted(entry)) {
-                StreamTrace("XCI EnsureEntryStarted fail name='%s'", entry.name.c_str());
-                return false;
-            }
-
-            u64 remaining = collection.size;
-            u64 offset = collection.offset;
-            StreamTrace("XCI Collection start name='%s' off=%llu size=%llu",
-                entry.name.c_str(),
-                static_cast<unsigned long long>(collection.offset),
-                static_cast<unsigned long long>(collection.size));
-            while (remaining > 0) {
-                const auto chunk = static_cast<size_t>(std::min<u64>(remaining, buf.size()));
-                u64 bytes_read = 0;
-                if (R_FAILED(source.Read(buf.data(), static_cast<s64>(offset), static_cast<s64>(chunk), &bytes_read))) {
-                    StreamTrace("XCI Source.Read fail name='%s' off=%llu chunk=%zu",
+        if (!tin::install::StreamingInstallHelper::InstallCollectionSetFromSource<MtpStreamSource, EntryState>(
+                *m_helper,
+                source,
+                collections,
+                m_dest_storage,
+                0x400000,
+                entries,
+                [](const auto&, const auto&) {},
+                [&](const auto& collection, const auto& entry) {
+                    StreamTrace("XCI Collection start name='%s' off=%llu size=%llu",
                         entry.name.c_str(),
-                        static_cast<unsigned long long>(offset),
-                        chunk);
-                    return false;
-                }
-                if (bytes_read == 0) {
-                    StreamTrace("XCI Source.Read eof name='%s' off=%llu", entry.name.c_str(), static_cast<unsigned long long>(offset));
-                    return false;
-                }
-                if (!WriteEntryData(entry, buf.data(), static_cast<size_t>(bytes_read))) {
-                    StreamTrace("XCI WriteEntryData fail name='%s' bytes=%llu",
-                        entry.name.c_str(),
-                        static_cast<unsigned long long>(bytes_read));
-                    return false;
-                }
-                offset += bytes_read;
-                remaining -= bytes_read;
-            }
-
-            StreamTrace("XCI Collection done name='%s' size=%llu",
-                entry.name.c_str(),
-                static_cast<unsigned long long>(entry.size));
-            entries.emplace(entry.name, std::move(entry));
-        }
-
-        for (auto& [name, entry] : entries) {
-            if (entry.is_ticket) {
-                auto it = entries.find(entry.pair_base_name + ".cert");
-                if (it != entries.end() && !entry.ticket_buf.empty() && !it->second.cert_buf.empty()) {
-                    const Result rc = esImportTicket(entry.ticket_buf.data(), entry.ticket_buf.size(), it->second.cert_buf.data(), it->second.cert_buf.size());
-                    if (R_FAILED(rc)) {
-                        LOG_DEBUG("MTP XCI finalize: ticket import failed (0x%08x)\n", rc);
-                        StreamTrace("XCI ticket import fail base='%s' rc=0x%08x", entry.pair_base_name.c_str(), rc);
+                        static_cast<unsigned long long>(collection.dataOffset),
+                        static_cast<unsigned long long>(collection.fileSize));
+                    return true;
+                },
+                [&](const auto&, const auto& entry, u64 bytes_read, u64 offset, u64) {
+                    if (bytes_read == 0) {
+                        StreamTrace("XCI Source.Read eof name='%s' off=%llu", entry.name.c_str(), static_cast<unsigned long long>(offset));
                         return false;
                     }
-                }
-            }
+                    return true;
+                },
+                [&](const auto&, const auto& entry) {
+                    StreamTrace("XCI Collection done name='%s' size=%llu",
+                        entry.name.c_str(),
+                        static_cast<unsigned long long>(entry.size));
+                    return true;
+                })) {
+            return false;
         }
 
-        try {
-            m_helper->CommitAll();
+        const bool ok = tin::install::StreamingInstallHelper::FinalizeInstallEntries(
+            *m_helper,
+            entries,
+            [](const auto& map_entry) -> const auto& {
+                return map_entry.second;
+            },
+            [&](const std::string& base, Result rc) {
+                LOG_DEBUG("MTP XCI finalize: ticket import failed (0x%08x)\n", rc);
+                StreamTrace("XCI ticket import fail base='%s' rc=0x%08x", base.c_str(), rc);
+                return false;
+            },
+            [&](const char* message) {
+                if (message != nullptr) {
+                    LOG_DEBUG("MTP XCI finalize: CommitAll failed: %s\n", message);
+                    StreamTrace("XCI CommitAll exception='%s'", message);
+                } else {
+                    LOG_DEBUG("MTP XCI finalize: CommitAll failed with unknown exception\n");
+                    StreamTrace("XCI CommitAll unknown exception");
+                }
+            });
+        if (ok) {
             StreamTrace("XCI CommitAll ok");
-            return true;
-        } catch (const std::exception& e) {
-            LOG_DEBUG("MTP XCI finalize: CommitAll failed: %s\n", e.what());
-            StreamTrace("XCI CommitAll exception='%s'", e.what());
-            return false;
-        } catch (...) {
-            LOG_DEBUG("MTP XCI finalize: CommitAll failed with unknown exception\n");
-            StreamTrace("XCI CommitAll unknown exception");
-            return false;
         }
+        return ok;
     }
 
     NcmStorageId m_dest_storage = NcmStorageId_SdCard;

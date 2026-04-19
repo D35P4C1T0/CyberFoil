@@ -22,17 +22,33 @@ SOFTWARE.
 
 #pragma once
 
-#include <switch.h>
-#include "install/collection_install.hpp"
-#include "install/xci.hpp"
-#include "nx/content_meta.hpp"
-#include "nx/ipc/tin_ipc.h"
+#include <vector>
 
-namespace tin::install::xci
+#include "install/install.hpp"
+#include "install/package_install_helper.hpp"
+
+namespace tin::install
 {
-    class XCIInstallTask : public tin::install::CollectionInstall
+    class CollectionInstall : public Install
     {
         public:
-            XCIInstallTask(NcmStorageId destStorageId, bool ignoreReqFirmVersion, const std::shared_ptr<XCI>& xci);
+            CollectionInstall(
+                NcmStorageId destStorageId,
+                bool ignoreReqFirmVersion,
+                std::vector<PackageCollectionEntry> collections,
+                BufferDataFunction bufferData,
+                StreamCollectionToPlaceholderFunction streamToPlaceholder);
+
+        protected:
+            std::vector<std::tuple<nx::ncm::ContentMeta, NcmContentInfo>> ReadCNMT() override;
+            void InstallTicketCert() override;
+            void InstallNCA(const NcmContentId& ncaId) override;
+
+            const PackageCollectionEntry* GetCollectionEntryByNcaId(const NcmContentId& ncaId) const;
+
+        private:
+            std::vector<PackageCollectionEntry> m_collections;
+            BufferDataFunction m_bufferData;
+            StreamCollectionToPlaceholderFunction m_streamToPlaceholder;
     };
-};
+}
