@@ -477,6 +477,7 @@ namespace tin::network
         auto streamWithRetry = [&](const std::string& url, size_t requestOffset, size_t requestSize) -> int
         {
             size_t bytesReceived = 0;
+            int lastRc = 0;
 
             auto trackingFunc = [&](u8* buf, size_t sz) -> size_t {
                 size_t written = streamFunc(buf, sz);
@@ -504,6 +505,7 @@ namespace tin::network
                     const int rc = StreamHttpRangeForUrl(url, currentOffset, remaining, trackingFunc);
                     if (rc == 0)
                         return 0;
+                    lastRc = rc;
 
                     const bool fatal =
                         rc == 1999 ||
@@ -517,7 +519,7 @@ namespace tin::network
                     {
                         LOG_DEBUG("StreamDataRange: fatal error, aborting (url=%s rc=%d)\n",
                             url.c_str(), rc);
-                        return 1;
+                        return rc;
                     }
 
                     LOG_DEBUG("StreamDataRange: retriable error (url=%s rc=%d), %d retries left\n",
@@ -533,7 +535,7 @@ namespace tin::network
                 break;
             }
 
-            return 1;
+            return lastRc != 0 ? lastRc : 1;
         };
 
         if (!m_isJbod)
@@ -670,4 +672,3 @@ namespace tin::network
         curl_easy_cleanup(curl);
     }
 }
-

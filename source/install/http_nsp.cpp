@@ -104,6 +104,7 @@ namespace tin::install::nsp
         u64 pfs0Offset;
         u64 ncaSize;
         RetryConfirmState retryConfirm;
+        std::atomic<int> transferRc{0};
     };
 
     int CurlStreamFunc(void* in)
@@ -133,8 +134,11 @@ namespace tin::install::nsp
                 return !stopThreadsHttpNsp && args->retryConfirm.approved.load();
             };
 
-            if (args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc, retryConfirmFunc) == 1)
+            const int rc = args->download->StreamDataRange(args->pfs0Offset, args->ncaSize, streamFunc, retryConfirmFunc);
+            if (rc != 0) {
+                args->transferRc.store(rc);
                 stopThreadsHttpNsp = true;
+            }
         }
         catch (...) {
             stopThreadsHttpNsp = true;
@@ -280,7 +284,12 @@ namespace tin::install::nsp
         bufferedPlaceholderWriter.close();
         if (inst::ui::instPage::isInstallCancelRequested())
             THROW_FORMAT("Installation canceled.");
-        if (stopThreadsHttpNsp) THROW_FORMAT(("inst.net.transfer_interput"_lang).c_str());
+        if (stopThreadsHttpNsp) {
+            const int rc = args.transferRc.load();
+            if (rc != 0)
+                THROW_FORMAT("HTTP stream failed (rc=%d)\n", rc);
+            THROW_FORMAT(("inst.net.transfer_interput"_lang).c_str());
+        }
     }
 
     void HTTPNSP::BufferData(void* buf, off_t offset, size_t size)

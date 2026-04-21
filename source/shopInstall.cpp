@@ -40,9 +40,11 @@
 #define HAVE_LIB_BLOB 0
 #endif
 
+#if HAVE_LIB_BLOB
 extern "C" {
     bool z9f1(const void* wrappedKey, std::size_t wrappedLen, void* outAesKey16) __attribute__((weak));
 }
+#endif
 
 namespace inst::ui {
     extern MainApplication *mainApp;
@@ -370,6 +372,7 @@ namespace {
         return true;
     }
 
+#if HAVE_LIB_BLOB
     bool TryUnwrapLegacyAesKey(const std::uint8_t* wrappedKey, std::vector<std::uint8_t>& outAesKey)
     {
         outAesKey.clear();
@@ -389,6 +392,7 @@ namespace {
         inst::util::SecureWipe(unwrapped.data(), unwrapped.size());
         return true;
     }
+#endif
 
     bool DecodeLegacyPayload(const std::string& body, std::string& outDecoded, std::string& outError)
     {
@@ -2369,4 +2373,3 @@ namespace shopInstStuff {
         inst::util::deinitInstallServices();
     }
 }
-

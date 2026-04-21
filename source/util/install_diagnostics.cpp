@@ -120,6 +120,11 @@ namespace inst::diag {
         const std::regex rcRegex("(0x[0-9a-fA-F]{8})");
         if (std::regex_search(errorText, m, rcRegex) && m.size() > 1)
             failure.code = m[1].str();
+        if (failure.code.empty()) {
+            const std::regex decimalRcRegex("rc=([0-9]+)");
+            if (std::regex_search(errorText, m, decimalRcRegex) && m.size() > 1)
+                failure.code = "rc=" + m[1].str();
+        }
 
         if (ContainsAny(lower, {"installation canceled", "cancelled", "canceled"})) {
             failure.canceled = true;
@@ -132,6 +137,13 @@ namespace inst::diag {
             failure.category = "Signature/Keys issue";
             failure.summary = "[ERROR] Missing required keys or invalid signatures.";
             failure.recommendation = "Check signature patches, keyset, and ticket/cert validity.";
+            return failure;
+        }
+
+        if (ContainsAny(lower, {"http range read failed", "http stream failed", "range request failed", "streamdatarange", "transfer", "curl=", "network"})) {
+            failure.category = "Network/download failure";
+            failure.summary = "[ERROR] Download failed before install could complete.";
+            failure.recommendation = "Check shop download URL, credentials, network, and whether the server supports HTTP range requests.";
             return failure;
         }
 
