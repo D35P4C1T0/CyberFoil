@@ -409,6 +409,28 @@ namespace inst::util {
         ensureNavigationClickAudioReadyLocked(audioPath);
     }
 
+    void releaseNavigationClickAudio() {
+        std::lock_guard<std::mutex> lock(gAudioPlaybackMutex);
+        updateExitLog("navigation audio release begin open=%d chunk=%d", gNavigationClickAudioOpen ? 1 : 0, gNavigationClickChunk != nullptr ? 1 : 0);
+
+        if (gNavigationClickAudioOpen)
+            Mix_HaltChannel(-1);
+
+        if (gNavigationClickChunk != nullptr) {
+            Mix_FreeChunk(gNavigationClickChunk);
+            gNavigationClickChunk = nullptr;
+        }
+
+        gNavigationClickLoadedPath.clear();
+
+        if (gNavigationClickAudioOpen) {
+            Mix_CloseAudio();
+            gNavigationClickAudioOpen = false;
+        }
+
+        updateExitLog("navigation audio release done");
+    }
+
     void playAudio(std::string audioPath) {
         if (audioPath.empty())
             return;

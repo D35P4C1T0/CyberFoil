@@ -25,6 +25,7 @@ namespace inst::util {
     std::string getIPAddress();
     bool usbIsConnected();
     void primeNavigationClickAudio();
+    void releaseNavigationClickAudio();
     void playAudio(std::string audioPath);
     void playNavigationClick();
     void playNavigationClickIfNeeded(std::uint64_t buttonsDown);

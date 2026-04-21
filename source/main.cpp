@@ -33,6 +33,8 @@ int main(int argc, char* argv[])
         main->Prepare();
         inst::util::updateExitLog("main prepared; show begin");
         main->ShowWithFadeIn();
+        inst::util::updateExitLog("navigation audio release before renderer close");
+        inst::util::releaseNavigationClickAudio();
         inst::util::updateExitLog("main loop returned; renderer close begin");
         main->Close();
         inst::util::updateExitLog("renderer close done");
@@ -55,5 +57,6 @@ int main(int argc, char* argv[])
         inst::util::updateExitLog("main cleanup deinit requested");
         inst::util::deinitApp();
     }
+    inst::util::updateExitLog("main returning rc=0");
     return 0;
 }
