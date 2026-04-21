@@ -695,7 +695,7 @@ namespace inst::config {
         shopStartGridMode = false;
         offlineDbAutoCheckOnStartup = true;
         verboseInstallLogging = false;
-        updateExitDebugLogging = true;
+        updateExitDebugLogging = false;
         bool hasHttpUserAgentModeKey = false;
         bool needsConfigRewrite = false;
 
