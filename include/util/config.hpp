@@ -47,6 +47,7 @@ namespace inst::config {
     extern bool shopStartGridMode;
     extern bool offlineDbAutoCheckOnStartup;
     extern bool verboseInstallLogging;
+    extern bool updateExitDebugLogging;
 
     struct ShopProfile {
         std::string fileName;
@@ -74,4 +75,3 @@ namespace inst::config {
     void setConfig();
     void parseConfig();
 }
-

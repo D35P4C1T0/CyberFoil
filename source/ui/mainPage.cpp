@@ -681,7 +681,7 @@ namespace inst::ui {
     }
 
     void MainPage::exitMenuItem_Click() {
-        mainApp->RequestExitWithFadeOut();
+        mainApp->RequestExitWithFadeOut("main menu");
     }
 
     void MainPage::settingsMenuItem_Click() {
@@ -871,7 +871,7 @@ namespace inst::ui {
         }
         inst::util::playNavigationClickIfNeeded(Down);
         if (((Down & HidNpadButton_Plus) || (Down & HidNpadButton_Minus) || (Down & HidNpadButton_B)) && mainApp->IsShown()) {
-            mainApp->RequestExitWithFadeOut();
+            mainApp->RequestExitWithFadeOut("main hotkey");
         }
         if (Down & HidNpadButton_Y) {
             this->showSelectedMainInfo();
@@ -935,4 +935,3 @@ namespace inst::ui {
             this->activateSelectedMainItem();
     }
 }
-

@@ -98,15 +98,20 @@ namespace inst::ui {
     }
 
     void MainApplication::ReleaseRomFs() {
+        inst::util::updateExitLog("main app ReleaseRomFs requested");
         inst::util::releaseRomFs();
     }
 
-    void MainApplication::RequestExitWithFadeOut() {
+    void MainApplication::RequestExitWithFadeOut(const char* reason) {
+        inst::util::updateExitLog("exit request reason=%s shown=%d alreadyRequested=%d", reason == nullptr ? "unknown" : reason, this->show ? 1 : 0, this->exitRequested ? 1 : 0);
         if (!this->show || this->exitRequested)
             return;
         this->exitRequested = true;
+        inst::util::updateExitLog("fade out begin reason=%s", reason == nullptr ? "unknown" : reason);
         this->FadeOut();
+        inst::util::updateExitLog("fade out done reason=%s", reason == nullptr ? "unknown" : reason);
         this->show = false;
+        inst::util::updateExitLog("show flag cleared reason=%s", reason == nullptr ? "unknown" : reason);
     }
 
     void MainApplication::OnLoad() {

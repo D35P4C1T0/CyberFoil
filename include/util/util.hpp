@@ -7,6 +7,7 @@ namespace inst::util {
     void initApp ();
     void deinitApp ();
     void releaseRomFs();
+    void updateExitLog(const char* format, ...);
     void initInstallServices();
     void deinitInstallServices();
     bool ignoreCaseCompare(const std::string &a, const std::string &b);

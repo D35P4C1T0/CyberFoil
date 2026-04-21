@@ -31,13 +31,20 @@ int main(int argc, char* argv[])
             });
         }
         main->Prepare();
+        inst::util::updateExitLog("main prepared; show begin");
         main->ShowWithFadeIn();
+        inst::util::updateExitLog("main loop returned; renderer close begin");
         main->Close();
+        inst::util::updateExitLog("renderer close done");
         if (updateThread.joinable()) {
+            inst::util::updateExitLog("joining update thread");
             updateThread.join();
+            inst::util::updateExitLog("update thread joined");
         }
         if (offlineDbUpdateCheckThread.joinable()) {
+            inst::util::updateExitLog("joining offline db update thread");
             offlineDbUpdateCheckThread.join();
+            inst::util::updateExitLog("offline db update thread joined");
         }
     } catch (std::exception& e) {
         LOG_DEBUG("An error occurred:\n%s", e.what());
@@ -45,6 +52,7 @@ int main(int argc, char* argv[])
         LOG_DEBUG("An unknown error occurred during startup.");
     }
     if (appInitialized) {
+        inst::util::updateExitLog("main cleanup deinit requested");
         inst::util::deinitApp();
     }
     return 0;

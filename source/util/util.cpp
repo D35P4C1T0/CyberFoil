@@ -6,6 +6,8 @@
 #include <curl/curl.h>
 #include <regex>
 #include <mutex>
+#include <cstdarg>
+#include <cstdio>
 #include <arpa/inet.h>
 #include <unistd.h>
 #include "switch.h"
@@ -25,6 +27,7 @@ namespace inst::util {
         std::string gNavigationClickLoadedPath;
         bool gNavigationClickAudioOpen = false;
         bool gRomFsOpen = false;
+        const char* kUpdateExitLogPath = "sdmc:/switch/CyberFoil/update_exit_debug.log";
 
         bool ensureNavigationClickAudioReadyLocked(const std::string& audioPath) {
             int audio_rate = 22050;
@@ -115,6 +118,7 @@ namespace inst::util {
         if (!std::filesystem::exists("sdmc:/switch")) std::filesystem::create_directory("sdmc:/switch");
         if (!std::filesystem::exists(inst::config::appDir)) std::filesystem::create_directory(inst::config::appDir);
         inst::config::parseConfig();
+        updateExitLog("app init version=%s full=%s romfsOpen=%d", inst::config::appVersion.c_str(), inst::config::appVersionFull.c_str(), gRomFsOpen ? 1 : 0);
         primeNavigationClickAudio();
 
         socketInitializeDefault();
@@ -126,17 +130,43 @@ namespace inst::util {
     }
 
     void deinitApp () {
+        updateExitLog("app deinit begin");
         nx::hdd::exit();
+        updateExitLog("hdd exit done");
         socketExit();
+        updateExitLog("socket exit done");
         awoo_usbCommsExit();
+        updateExitLog("usb comms exit done");
         releaseRomFs();
+        updateExitLog("app deinit end");
     }
 
     void releaseRomFs() {
-        if (!gRomFsOpen)
+        if (!gRomFsOpen) {
+            updateExitLog("romfs release skipped: already closed");
             return;
-        romfsExit();
+        }
+        updateExitLog("romfs release begin");
+        const Result rc = romfsExit();
         gRomFsOpen = false;
+        updateExitLog("romfs release done rc=0x%08X", rc);
+    }
+
+    void updateExitLog(const char* format, ...) {
+        if (!inst::config::updateExitDebugLogging)
+            return;
+
+        FILE* f = fopen(kUpdateExitLogPath, "a");
+        if (f == nullptr)
+            return;
+
+        fprintf(f, "[tick=%llu] ", static_cast<unsigned long long>(armGetSystemTick()));
+        va_list args;
+        va_start(args, format);
+        vfprintf(f, format, args);
+        va_end(args);
+        fprintf(f, "\n");
+        fclose(f);
     }
 
     void initInstallServices() {

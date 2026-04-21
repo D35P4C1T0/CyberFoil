@@ -36,6 +36,7 @@ namespace inst::config {
     bool shopStartGridMode;
     bool offlineDbAutoCheckOnStartup;
     bool verboseInstallLogging;
+    bool updateExitDebugLogging;
 
     namespace {
         std::string ToLower(std::string value)
@@ -659,6 +660,7 @@ namespace inst::config {
             {"shopStartGridMode", shopStartGridMode},
             {"offlineDbAutoCheckOnStartup", offlineDbAutoCheckOnStartup},
             {"verboseInstallLogging", verboseInstallLogging},
+            {"updateExitDebugLogging", updateExitDebugLogging},
             {"shopRememberSelection", false},
             {"shopSelection", nlohmann::json::array()}
         };
@@ -693,6 +695,7 @@ namespace inst::config {
         shopStartGridMode = false;
         offlineDbAutoCheckOnStartup = true;
         verboseInstallLogging = false;
+        updateExitDebugLogging = true;
         bool hasHttpUserAgentModeKey = false;
         bool needsConfigRewrite = false;
 
@@ -729,6 +732,7 @@ namespace inst::config {
             if (j.contains("shopStartGridMode")) shopStartGridMode = j["shopStartGridMode"].get<bool>();
             if (j.contains("offlineDbAutoCheckOnStartup")) offlineDbAutoCheckOnStartup = j["offlineDbAutoCheckOnStartup"].get<bool>();
             if (j.contains("verboseInstallLogging")) verboseInstallLogging = j["verboseInstallLogging"].get<bool>();
+            if (j.contains("updateExitDebugLogging")) updateExitDebugLogging = j["updateExitDebugLogging"].get<bool>();
 
             static const char* currentKeys[] = {
                 "autoUpdate",
@@ -756,7 +760,8 @@ namespace inst::config {
                 "shopLegacyMode",
                 "shopStartGridMode",
                 "offlineDbAutoCheckOnStartup",
-                "verboseInstallLogging"
+                "verboseInstallLogging",
+                "updateExitDebugLogging"
             };
 
             for (const char* key : currentKeys) {
@@ -800,4 +805,3 @@ namespace inst::config {
             setConfig();
     }
 }
-

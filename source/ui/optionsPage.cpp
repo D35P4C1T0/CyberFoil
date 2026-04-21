@@ -438,6 +438,7 @@ namespace inst::ui {
             const std::string version = updateInfo.empty() ? std::string() : updateInfo[0];
             const std::string downloadUrl = updateInfo.size() > 1 ? updateInfo[1] : std::string();
             const std::string releaseNotes = updateInfo.size() > 2 ? updateInfo[2] : "No changelog available for this release.";
+            inst::util::updateExitLog("update dialog begin version=%s urlEmpty=%d", version.c_str(), downloadUrl.empty() ? 1 : 0);
 
             while (true) {
                 int choice = mainApp->CreateShowDialog(
@@ -447,30 +448,46 @@ namespace inst::ui {
                     false);
 
                 if (choice == 1) {
+                    inst::util::updateExitLog("update dialog changelog selected version=%s", version.c_str());
                     ShowPagedTextDialog("Changelog " + version, releaseNotes);
                     continue;
                 }
 
-                if (choice != 0)
+                if (choice != 0) {
+                    inst::util::updateExitLog("update dialog cancelled choice=%d version=%s", choice, version.c_str());
                     break;
+                }
 
+                inst::util::updateExitLog("update accepted version=%s url=%s", version.c_str(), downloadUrl.c_str());
                 inst::ui::instPage::loadInstallScreen();
                 inst::ui::instPage::setTopInstInfoText("options.update.top_info"_lang + version);
                 inst::ui::instPage::setInstBarPerc(0);
                 inst::ui::instPage::setInstInfoText("options.update.bot_info"_lang + version);
                 try {
                     std::string downloadName = inst::config::appDir + "/temp_download.zip";
-                    inst::curl::downloadFile(downloadUrl, downloadName.c_str(), 0, true);
+                    inst::util::updateExitLog("update download begin path=%s", downloadName.c_str());
+                    const bool downloadOk = inst::curl::downloadFile(downloadUrl, downloadName.c_str(), 0, true);
+                    std::error_code sizeEc;
+                    const auto tempSize = std::filesystem::exists(downloadName) ? std::filesystem::file_size(downloadName, sizeEc) : 0;
+                    inst::util::updateExitLog("update download done ok=%d exists=%d size=%llu sizeErr=%d", downloadOk ? 1 : 0, std::filesystem::exists(downloadName) ? 1 : 0, static_cast<unsigned long long>(tempSize), sizeEc.value());
+                    if (!downloadOk)
+                        throw std::runtime_error("Failed to download update archive");
                     mainApp->ReleaseRomFs();
                     inst::ui::instPage::setInstInfoText("options.update.bot_info2"_lang + version);
-                    if (!inst::zip::extractFile(downloadName, "sdmc:/"))
+                    inst::util::updateExitLog("update extract begin path=%s", downloadName.c_str());
+                    const bool extractOk = inst::zip::extractFile(downloadName, "sdmc:/");
+                    inst::util::updateExitLog("update extract done ok=%d", extractOk ? 1 : 0);
+                    if (!extractOk)
                         throw std::runtime_error("Failed to extract update archive");
-                    std::filesystem::remove(downloadName);
+                    std::error_code removeEc;
+                    const bool removed = std::filesystem::remove(downloadName, removeEc);
+                    inst::util::updateExitLog("update temp cleanup removed=%d err=%d", removed ? 1 : 0, removeEc.value());
                     mainApp->CreateShowDialog("options.update.complete"_lang, "options.update.end_desc"_lang, {"common.ok"_lang}, false);
                 } catch (...) {
+                    inst::util::updateExitLog("update failed before exit version=%s", version.c_str());
                     mainApp->CreateShowDialog("options.update.failed"_lang, "options.update.end_desc"_lang, {"common.ok"_lang}, false);
                 }
-                mainApp->RequestExitWithFadeOut();
+                mainApp->RequestExitWithFadeOut("app update");
                 break;
             }
         return;
@@ -548,6 +565,7 @@ namespace inst::ui {
             addItem("options.menu_items.ignore_firm"_lang, true, inst::config::ignoreReqVers);
             addItem("options.menu_items.nca_verify"_lang, true, inst::config::validateNCAs);
             addItem("Verbose install logs", true, inst::config::verboseInstallLogging);
+            addItem("Update/exit debug logs", true, inst::config::updateExitDebugLogging);
             addItem("options.menu_items.boost_mode"_lang, true, inst::config::overClock);
             addItem("options.menu_items.ask_delete"_lang, true, inst::config::deletePrompt);
             addItem("options.menu_items.sound"_lang, true, inst::config::soundEnabled);
@@ -773,7 +791,7 @@ namespace inst::ui {
             std::vector<std::string> languageList;
             int selectedIndex = this->menu->GetSelectedIndex();
             if (this->selectedSection == 0) {
-                static const int kGeneralMap[] = {0, 1, 10, 2, 3, 6, 7, 8};
+                static const int kGeneralMap[] = {0, 1, 10, 27, 2, 3, 6, 7, 8};
                 if ((selectedIndex < 0) || (selectedIndex >= static_cast<int>(sizeof(kGeneralMap) / sizeof(kGeneralMap[0])))) return;
                 selectedIndex = kGeneralMap[selectedIndex];
             } else if (this->selectedSection == 1) {
@@ -805,6 +823,11 @@ namespace inst::ui {
                     break;
                 case 10:
                     inst::config::verboseInstallLogging = !inst::config::verboseInstallLogging;
+                    inst::config::setConfig();
+                    this->refreshOptions();
+                    break;
+                case 27:
+                    inst::config::updateExitDebugLogging = !inst::config::updateExitDebugLogging;
                     inst::config::setConfig();
                     this->refreshOptions();
                     break;
@@ -1184,7 +1207,7 @@ namespace inst::ui {
                             inst::config::languageSetting = 99;
                     }
                     inst::config::setConfig();
-                    mainApp->RequestExitWithFadeOut();
+                    mainApp->RequestExitWithFadeOut("language change");
                     break;
                 case 17:
                     if (inst::util::getIPAddress() == "1.0.0.127") {

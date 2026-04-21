@@ -21,7 +21,7 @@ namespace inst::ui {
             void OnLoad() override;
             void RefreshInputDevice(bool force = false);
             void ReleaseRomFs();
-            void RequestExitWithFadeOut();
+            void RequestExitWithFadeOut(const char* reason = "unknown");
             pu::ui::Layout::Ref GetCurrentLayout() const { return this->lyt; }
             MainPage::Ref mainPage;
             netInstPage::Ref netinstPage;
