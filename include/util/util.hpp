@@ -6,6 +6,7 @@ namespace inst::util {
     void SecureWipe(void* ptr, std::size_t len);
     void initApp ();
     void deinitApp ();
+    void releaseRomFs();
     void initInstallServices();
     void deinitInstallServices();
     bool ignoreCaseCompare(const std::string &a, const std::string &b);

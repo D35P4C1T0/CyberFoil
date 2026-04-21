@@ -20,6 +20,8 @@ namespace inst::ui {
             PU_SMART_CTOR(MainApplication)
             void OnLoad() override;
             void RefreshInputDevice(bool force = false);
+            void ReleaseRomFs();
+            void RequestExitWithFadeOut();
             pu::ui::Layout::Ref GetCurrentLayout() const { return this->lyt; }
             MainPage::Ref mainPage;
             netInstPage::Ref netinstPage;
@@ -31,5 +33,6 @@ namespace inst::ui {
             optionsPage::Ref optionspage;
         private:
             AppletFocusState lastFocusState = AppletFocusState_InFocus;
+            bool exitRequested = false;
     };
 }

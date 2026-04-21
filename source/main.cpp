@@ -15,8 +15,10 @@ int main(int argc, char* argv[])
         debugLogReset();
         inst::util::initApp();
         appInitialized = true;
+        auto rendererOptions = RendererInitOptions::RendererNoSound;
+        rendererOptions.InitRomFs = false;
         auto renderer = Renderer::New(SDL_INIT_TIMER | SDL_INIT_VIDEO | SDL_INIT_EVENTS | SDL_INIT_JOYSTICK | SDL_INIT_HAPTIC | SDL_INIT_GAMECONTROLLER,
-            RendererInitOptions::RendererNoSound, RendererHardwareFlags);
+            rendererOptions, RendererHardwareFlags);
         auto main = inst::ui::MainApplication::New(renderer);
         std::thread updateThread;
         std::thread offlineDbUpdateCheckThread;
@@ -30,6 +32,7 @@ int main(int argc, char* argv[])
         }
         main->Prepare();
         main->ShowWithFadeIn();
+        main->Close();
         if (updateThread.joinable()) {
             updateThread.join();
         }

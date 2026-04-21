@@ -461,16 +461,16 @@ namespace inst::ui {
                 try {
                     std::string downloadName = inst::config::appDir + "/temp_download.zip";
                     inst::curl::downloadFile(downloadUrl, downloadName.c_str(), 0, true);
-                    romfsExit();
+                    mainApp->ReleaseRomFs();
                     inst::ui::instPage::setInstInfoText("options.update.bot_info2"_lang + version);
-                    inst::zip::extractFile(downloadName, "sdmc:/");
+                    if (!inst::zip::extractFile(downloadName, "sdmc:/"))
+                        throw std::runtime_error("Failed to extract update archive");
                     std::filesystem::remove(downloadName);
                     mainApp->CreateShowDialog("options.update.complete"_lang, "options.update.end_desc"_lang, {"common.ok"_lang}, false);
                 } catch (...) {
                     mainApp->CreateShowDialog("options.update.failed"_lang, "options.update.end_desc"_lang, {"common.ok"_lang}, false);
                 }
-                mainApp->FadeOut();
-                mainApp->Close();
+                mainApp->RequestExitWithFadeOut();
                 break;
             }
         return;
@@ -1184,8 +1184,7 @@ namespace inst::ui {
                             inst::config::languageSetting = 99;
                     }
                     inst::config::setConfig();
-                    mainApp->FadeOut();
-                    mainApp->Close();
+                    mainApp->RequestExitWithFadeOut();
                     break;
                 case 17:
                     if (inst::util::getIPAddress() == "1.0.0.127") {

@@ -97,6 +97,18 @@ namespace inst::ui {
         }
     }
 
+    void MainApplication::ReleaseRomFs() {
+        inst::util::releaseRomFs();
+    }
+
+    void MainApplication::RequestExitWithFadeOut() {
+        if (!this->show || this->exitRequested)
+            return;
+        this->exitRequested = true;
+        this->FadeOut();
+        this->show = false;
+    }
+
     void MainApplication::OnLoad() {
         mainApp = this;
 

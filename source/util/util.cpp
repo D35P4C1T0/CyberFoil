@@ -24,6 +24,7 @@ namespace inst::util {
         Mix_Chunk* gNavigationClickChunk = nullptr;
         std::string gNavigationClickLoadedPath;
         bool gNavigationClickAudioOpen = false;
+        bool gRomFsOpen = false;
 
         bool ensureNavigationClickAudioReadyLocked(const std::string& audioPath) {
             int audio_rate = 22050;
@@ -109,6 +110,8 @@ namespace inst::util {
     }
 
     void initApp () {
+        if (R_SUCCEEDED(romfsInit()))
+            gRomFsOpen = true;
         if (!std::filesystem::exists("sdmc:/switch")) std::filesystem::create_directory("sdmc:/switch");
         if (!std::filesystem::exists(inst::config::appDir)) std::filesystem::create_directory(inst::config::appDir);
         inst::config::parseConfig();
@@ -126,6 +129,14 @@ namespace inst::util {
         nx::hdd::exit();
         socketExit();
         awoo_usbCommsExit();
+        releaseRomFs();
+    }
+
+    void releaseRomFs() {
+        if (!gRomFsOpen)
+            return;
+        romfsExit();
+        gRomFsOpen = false;
     }
 
     void initInstallServices() {
